@@ -291,18 +291,19 @@ def getFlameHeight(model: str,
         flame_length = ma.array([float(flame_length)], mask=isnan([flame_length]))
 
     # Verify fire_type
-    if not isinstance(fire_type, (numbers.Real, float, ndarray, type(None))):
-        raise TypeError('fire_type must be either None, str, int or numpy ndarray data types')
-    elif isinstance(fire_type, (str, type(None))):
-        if fire_type not in ['surface', 'passive crown', 'active crown']:
-            raise ValueError(f'The "fire_type" parameter must be one of the following: '
-                             f'"surface", "passive crown", "active crown"')
-        else:
-            fire_type = fire_type_dict.get(fire_type, nan)  # Convert fire_type to integer value
-    if isinstance(fire_type, ndarray):
-        fire_type = ma.array(fire_type, mask=isnan(fire_type))
-    elif isinstance(midflame_ws, numbers.Real):
-        fire_type = ma.array([float(fire_type)], mask=isnan([fire_type]))
+    if model == 'Nelson':
+        if not isinstance(fire_type, (numbers.Real, float, ndarray, type(None))):
+            raise TypeError('fire_type must be either None, str, int or numpy ndarray data types')
+        elif isinstance(fire_type, (str, type(None))):
+            if fire_type not in ['surface', 'passive crown', 'active crown']:
+                raise ValueError(f'The "fire_type" parameter must be one of the following: '
+                                 f'"surface", "passive crown", "active crown"')
+            else:
+                fire_type = fire_type_dict.get(fire_type, nan)  # Convert fire_type to integer value
+        if isinstance(fire_type, ndarray):
+            fire_type = ma.array(fire_type, mask=isnan(fire_type))
+        elif isinstance(midflame_ws, numbers.Real):
+            fire_type = ma.array([float(fire_type)], mask=isnan([fire_type]))
 
     # Verify fire_intensity
     if not isinstance(fire_intensity, (numbers.Real, ndarray, type(None))):
@@ -339,7 +340,7 @@ def getFlameHeight(model: str,
     # Verify slope_units
     if not isinstance(slope_units, (str, type(None))):
         raise TypeError('slope_units must be str or None data types')
-    elif slope_units not in ['degrees', 'percent']:
+    elif (slope_units is not None) and (slope_units not in ['degrees', 'percent']):
         raise ValueError(f'The "slope_units" parameter must be one of the following: "degrees", "percent"')
 
     if model == 'Nelson':
