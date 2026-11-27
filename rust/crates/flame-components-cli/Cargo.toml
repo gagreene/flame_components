@@ -1,0 +1,16 @@
+[package]
+name = "flame-components-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Command-line flame-component calculations"
+
+[[bin]]
+name = "flame-components"
+path = "src/main.rs"
+
+[dependencies]
+flame-components = { path = "../flame-components" }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }

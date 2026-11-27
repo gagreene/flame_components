@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use ndarray::{ArrayD, ArrayViewD};
 
+use crate::precision::Precision;
 use crate::{array::broadcast, Cell, Error};
 
 macro_rules! length_models {
@@ -108,14 +109,29 @@ pub fn flame_length_array(
     fire_intensity: ArrayViewD<'_, Cell<f64>>,
     flame_depth: Option<ArrayViewD<'_, Cell<f64>>>,
 ) -> Result<ArrayD<Cell<f64>>, Error> {
+    flame_length_array_with_precision(model, fire_intensity, flame_depth, [8; 4])
+}
+
+/// Evaluate each stage at its requested width in bytes. The stages are the
+/// intensity power, coefficient multiplication, depth power, and division.
+pub fn flame_length_array_with_precision(
+    model: LengthModel,
+    fire_intensity: ArrayViewD<'_, Cell<f64>>,
+    flame_depth: Option<ArrayViewD<'_, Cell<f64>>>,
+    widths: [u8; 4],
+) -> Result<ArrayD<Cell<f64>>, Error> {
+    let [power, product, depth_power, quotient] = Precision::widths(widths)?;
     let (coefficient, intensity_exponent, depth_exponent) = model.coefficients();
-    let numerator = |intensity: Cell<f64>| coefficient * intensity.powf(intensity_exponent);
+    let numerator =
+        |intensity| product.mul(coefficient.into(), power.pow(intensity, intensity_exponent));
     match depth_exponent {
         Some(exponent) => {
             let flame_depth = flame_depth.ok_or(Error::MissingFlameDepth)?;
             broadcast(
                 [fire_intensity.view(), flame_depth.view()],
-                |[intensity, depth]| numerator(intensity) / depth.powf(exponent),
+                |[intensity, depth]| {
+                    quotient.div(numerator(intensity), depth_power.pow(depth, exponent))
+                },
             )
         }
         None => broadcast([fire_intensity], |[intensity]| numerator(intensity)),

@@ -5,29 +5,34 @@ Created on Wed Oct  11 13:25:52 2023
 
 Flame Components — fire behavior calculations for surface and crown fires.
 
-NaN handling: All functions accept numpy arrays containing NaN values. NaNs are
-automatically masked via numpy.ma and propagate silently through calculations —
-masked input cells produce masked (NaN) output cells without warning. To inspect
-how many cells were masked, check ``result_array[numpy.isnan(result_array)].size``
-on the returned array.
+Input NaNs and explicit NumPy masks are handled per cell. The selected branch
+determines which masks propagate. Masked results are returned as NaN. The
+Python backend preserves explicit NumPy error modes such as over="raise".
 """
 
 import warnings
 
 from numpy import errstate, geterr, ndarray
 
-from . import _backend, _blocks, _equations, _utils
+from . import _backend, _blocks, _equations, _native_bridge, _utils
+
+_CANOPY_WARNING = (
+    'One or more canopy_ht values are 0. These will be replaced with 1.6404 ft (0.5 m) '
+    'to avoid division-by-zero in the Albini & Baughman (1979) equation. '
+    'Note: by this point canopy_ht has been converted to feet internally.'
+)
 
 
-def _python_arithmetic(backend):
-    if backend == "rust":
-        raise NotImplementedError("Rust calculation bindings are not available in this build")
+def _python_arithmetic():
     ignore_warnings = {event: "ignore" for event, handling in geterr().items() if handling == "warn"}
     return errstate(**ignore_warnings)
 
 
 def _run_equation(backend, equation, *args):
-    with _python_arithmetic(backend):
+    if backend == "rust":
+        result, _ = _native_bridge.run(equation.__name__, *args)
+        return result
+    with _python_arithmetic():
         return equation(*args)
 
 
@@ -77,19 +82,25 @@ def get_mid_flame_ws(wind_speed: float | ndarray,
     canopy_baseht = _utils.numeric_array("canopy_baseht", canopy_baseht)
     _utils.check_choice("units", units, ("SI", "IMP"))
 
-    with _python_arithmetic(backend):
-        wind_speed, canopy_ht, canopy_baseht, substituted_canopy_height = _equations.prepare_mid_flame_ws(
-            wind_speed, canopy_ht, canopy_baseht, units
-        )
-        if substituted_canopy_height:
-            warnings.warn(
-                'One or more canopy_ht values are 0. These will be replaced with 1.6404 ft (0.5 m) '
-                'to avoid division-by-zero in the Albini & Baughman (1979) equation. '
-                'Note: by this point canopy_ht has been converted to feet internally.',
-                UserWarning,
-                stacklevel=2,
+    if backend == "rust":
+        try:
+            result, substituted = _native_bridge.run(
+                "mid_flame_ws", wind_speed, canopy_cover, canopy_ht, canopy_baseht, units
             )
-        result = _equations.mid_flame_ws(wind_speed, canopy_cover, canopy_ht, canopy_baseht)
+        except ValueError as error:
+            if getattr(error, "substituted_canopy_height", False):
+                warnings.warn(_CANOPY_WARNING, UserWarning, stacklevel=2)
+            raise
+        if substituted:
+            warnings.warn(_CANOPY_WARNING, UserWarning, stacklevel=2)
+    else:
+        with _python_arithmetic():
+            wind_speed, canopy_ht, canopy_baseht, substituted = _equations.prepare_mid_flame_ws(
+                wind_speed, canopy_ht, canopy_baseht, units
+            )
+            if substituted:
+                warnings.warn(_CANOPY_WARNING, UserWarning, stacklevel=2)
+            result = _equations.mid_flame_ws(wind_speed, canopy_cover, canopy_ht, canopy_baseht)
     return _utils.nonnegative_result(result, return_array)
 
 

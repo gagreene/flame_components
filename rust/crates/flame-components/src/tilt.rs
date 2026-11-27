@@ -4,6 +4,7 @@ use std::f64::consts::FRAC_PI_2;
 
 use ndarray::{ArrayD, ArrayViewD, NdFloat};
 
+use crate::precision::Precision;
 use crate::{array::broadcast, Cell, Error, SlopeUnits, WindSpeedUnits};
 
 /// Model-specific flame-tilt inputs, as cells or array views.
@@ -57,20 +58,51 @@ fn finney_tilt(
     flame_height: Cell<f64>,
     slope_angle: Cell<f64>,
     slope_units: SlopeUnits,
+    precision: [Precision; 7],
 ) -> Cell<f64> {
-    let slope_rad = slope_units.radians(slope_angle);
-    let right_angle = Cell::present(90.0).radians();
+    let [slope, complement, product, ratio, horizontal, vertical, output] = precision;
+    let slope_rad = slope.slope(slope_angle, slope_units);
+    let angle = complement.sub(FRAC_PI_2.into(), slope_rad);
     // Keep the reference angle conversions in order because they affect rounding.
-    let tilt_h = (flame_height * (right_angle - slope_rad).sin().degrees() / flame_length)
-        .radians()
-        .asin()
-        + slope_rad;
-    Cell::select(
+    let projected = product.mul(flame_height, complement.degrees(complement.sin(angle)));
+    let tilt_h = horizontal.add(
+        ratio.asin(ratio.radians(ratio.div(projected, flame_length))),
+        slope_rad,
+    );
+    output.degrees(Cell::select(
         flame_height.eq_cell(flame_length),
         Cell::present(0.0),
-        FRAC_PI_2 - tilt_h,
+        vertical.sub(FRAC_PI_2.into(), tilt_h),
+    ))
+}
+
+/// Broadcast Finney tilt at the given floating-point widths (bytes) for slope
+/// radians, slope complement, height product, division by length, horizontal
+/// tilt, vertical tilt, and final degrees.
+pub fn finney_tilt_array_with_precision(
+    length: ArrayViewD<'_, Cell<f64>>,
+    height: ArrayViewD<'_, Cell<f64>>,
+    slope: ArrayViewD<'_, Cell<f64>>,
+    units: SlopeUnits,
+    widths: [u8; 7],
+) -> Result<ArrayD<Cell<f64>>, Error> {
+    let precision = Precision::widths(widths)?;
+    broadcast(
+        [length.view(), height.view(), slope.view()],
+        |[length, height, slope]| finney_tilt(length, height, slope, units, precision),
     )
-    .degrees()
+}
+
+/// Broadcast Standard tilt using 2-, 4-, or 8-byte floating-point arithmetic.
+pub fn standard_tilt_array_with_precision(
+    length: ArrayViewD<'_, Cell<f64>>,
+    height: ArrayViewD<'_, Cell<f64>>,
+    width: u8,
+) -> Result<ArrayD<Cell<f64>>, Error> {
+    let [p] = Precision::widths([width])?;
+    broadcast([length.view(), height.view()], |[length, height]| {
+        p.degrees(p.acos(p.div(height, length)))
+    })
 }
 
 fn validate_canopy_height(canopy_ht: Cell<f64>) -> Result<(), Error> {
@@ -84,18 +116,42 @@ fn butler_tilt(
     wind_speed: Cell<f64>,
     wind_speed_units: WindSpeedUnits,
     canopy_ht: Cell<f64>,
+    precision: [Precision; 10],
 ) -> Cell<f64> {
+    let [units, reciprocal, log_arg, log_sum, denom, canopy, cube, numerator, ratio, output] =
+        precision;
     let wind_speed = match wind_speed_units {
-        WindSpeedUnits::Kph => wind_speed / 3.6,
+        WindSpeedUnits::Kph => units.div(wind_speed, 3.6.into()),
         WindSpeedUnits::Mps => wind_speed,
-        WindSpeedUnits::Mph => wind_speed / 2.23694,
+        WindSpeedUnits::Mph => units.div(wind_speed, 2.23694.into()),
     };
-    let canopy_wind = wind_speed / (3.6 * (1.0 + (1.0 + (28.0 / canopy_ht)).log()));
-    let gravity = 9.81;
-    ((3.0 * canopy_wind.powf(3.0)) / (2.0 * gravity * 10.0))
-        .sqrt()
-        .atan()
-        .degrees()
+    let roughness = log_arg.add(1.0.into(), reciprocal.div(28.0.into(), canopy_ht));
+    let profile = log_sum.add(1.0.into(), log_arg.log(roughness));
+    let canopy_wind = canopy.div(wind_speed, denom.mul(3.6.into(), profile));
+    let buoyancy_ratio = ratio.div(
+        numerator.mul(3.0.into(), cube.pow(canopy_wind, 3.0)),
+        (2.0 * 9.81 * 10.0).into(),
+    );
+    output.degrees(ratio.atan(ratio.sqrt(buoyancy_ratio)))
+}
+
+/// Broadcast Butler tilt with widths in bytes for unit conversion, reciprocal
+/// height, log argument, log plus one, wind denominator, canopy wind, cubing,
+/// multiplication by three, gravity division, and final degrees.
+pub fn butler_tilt_array_with_precision(
+    wind_speed: ArrayViewD<'_, Cell<f64>>,
+    units: WindSpeedUnits,
+    canopy_ht: ArrayViewD<'_, Cell<f64>>,
+    widths: [u8; 10],
+) -> Result<ArrayD<Cell<f64>>, Error> {
+    canopy_ht
+        .iter()
+        .copied()
+        .try_for_each(validate_canopy_height)?;
+    let precision = Precision::widths(widths)?;
+    broadcast([wind_speed.view(), canopy_ht.view()], |[wind, canopy]| {
+        butler_tilt(wind, units, canopy, precision)
+    })
 }
 
 /// Calculate raw flame tilt in degrees measured from vertical.
@@ -117,6 +173,7 @@ pub fn flame_tilt(model: TiltModel<Cell<f64>>) -> Result<Cell<f64>, Error> {
             flame_height,
             slope_angle,
             slope_units,
+            [Precision::Double; 7],
         )),
         TiltModel::Butler {
             wind_speed,
@@ -124,7 +181,12 @@ pub fn flame_tilt(model: TiltModel<Cell<f64>>) -> Result<Cell<f64>, Error> {
             canopy_ht,
         } => {
             validate_canopy_height(canopy_ht)?;
-            Ok(butler_tilt(wind_speed, wind_speed_units, canopy_ht))
+            Ok(butler_tilt(
+                wind_speed,
+                wind_speed_units,
+                canopy_ht,
+                [Precision::Double; 10],
+            ))
         }
     }
 }
@@ -144,23 +206,18 @@ pub fn flame_tilt_array(
             flame_height,
             slope_angle,
             slope_units,
-        } => broadcast(
-            [flame_length, flame_height, slope_angle],
-            |[length, height, slope]| finney_tilt(length, height, slope, slope_units),
+        } => finney_tilt_array_with_precision(
+            flame_length,
+            flame_height,
+            slope_angle,
+            slope_units,
+            [8; 7],
         ),
         TiltModel::Butler {
             wind_speed,
             wind_speed_units,
             canopy_ht,
-        } => {
-            canopy_ht
-                .iter()
-                .copied()
-                .try_for_each(validate_canopy_height)?;
-            broadcast([wind_speed, canopy_ht], |[wind, canopy]| {
-                butler_tilt(wind, wind_speed_units, canopy)
-            })
-        }
+        } => butler_tilt_array_with_precision(wind_speed, wind_speed_units, canopy_ht, [8; 10]),
     }
 }
 

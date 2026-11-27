@@ -100,32 +100,8 @@ impl Cell<f64> {
         self.binary(rhs.into(), |a, b| a > b)
     }
 
-    pub(crate) fn sqrt(self) -> Self {
-        self.finite_result(f64::sqrt)
-    }
-
-    pub(crate) fn log(self) -> Self {
-        self.finite_result(f64::ln)
-    }
-
     pub(crate) fn powf(self, exponent: f64) -> Self {
         self.finite_result(|value| value.powf(exponent))
-    }
-
-    pub(crate) fn asin(self) -> Self {
-        self.finite_result(f64::asin)
-    }
-
-    pub(crate) fn atan(self) -> Self {
-        self.map(f64::atan)
-    }
-
-    pub(crate) fn sin(self) -> Self {
-        self.map(f64::sin)
-    }
-
-    pub(crate) fn radians(self) -> Self {
-        self.map(f64::to_radians)
     }
 }
 
@@ -209,8 +185,12 @@ mod tests {
         let infinity = Cell::input(f64::INFINITY);
         assert!(!(infinity * 0.0).masked);
         assert!((infinity * 0.0).value.is_nan());
-        assert!(infinity.sqrt().masked);
-        assert!(Cell::present(0.0).log().masked);
+        assert!(crate::precision::Precision::Double.sqrt(infinity).masked);
+        assert!(
+            crate::precision::Precision::Double
+                .log(Cell::present(0.0))
+                .masked
+        );
         assert!(Cell::present(1.01).acos().masked);
         assert_eq!(Cell::present(-2.0).powf(3.0), Cell::present(-8.0));
         assert!(Cell::present(-2.0).powf(0.5).masked);

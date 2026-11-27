@@ -8,6 +8,7 @@
 
 mod array;
 mod cell;
+mod precision;
 
 pub mod depth;
 pub mod height;
@@ -25,6 +26,8 @@ use std::fmt;
 /// Failures in requests to the standalone engine.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Error {
+    /// A kernel precision must be a 2-, 4-, or 8-byte IEEE floating-point type.
+    InvalidFloatWidth(u8),
     /// The trailing dimensions do not broadcast.
     IncompatibleShapes { shapes: Vec<Vec<usize>> },
     /// The broadcast output is too large to allocate.
@@ -42,6 +45,7 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidFloatWidth(width) => write!(f, "unsupported floating-point width {width}"),
             Self::IncompatibleShapes { shapes } => {
                 write!(f, "input shapes cannot be broadcast together: {shapes:?}")
             }

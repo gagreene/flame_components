@@ -98,3 +98,26 @@ def test_python_blocks_keep_mask_order_and_partial_block_under_spawn(monkeypatch
 def test_public_call_validates_backend_before_equation_input():
     with pytest.raises(ValueError, match="backend must be one of auto, rust, python"):
         core.get_flame_depth([], 2, backend="wrong")
+
+
+def test_explicit_rust_dispatches_normalized_data_masks_and_raw_results(monkeypatch):
+    calls = []
+
+    def flame_depth(ros, res_time):
+        data, mask = ros
+        times, time_mask = res_time
+        calls.append((data, mask, times, time_mask))
+        return np.array([4, 16], dtype=np.uint8), mask, False
+
+    extension = ModuleType("flame_components._native")
+    extension.flame_depth = flame_depth
+    monkeypatch.setitem(sys.modules, extension.__name__, extension)
+    result = core.get_flame_depth(
+        np.ma.array([2, 8], dtype=np.uint8, mask=[False, True]),
+        np.array([2, 2], dtype=np.uint8),
+        backend="rust",
+    )
+    assert len(calls) == 1
+    assert calls[0][0].dtype == np.uint8
+    np.testing.assert_array_equal(calls[0][1], [False, True])
+    np.testing.assert_array_equal(result, [4, np.nan])

@@ -38,7 +38,7 @@ def test_canopy_warning_precedes_later_calculation_error():
 
 def test_explicit_numpy_raise_policy_is_preserved():
     with np.errstate(over="raise"), pytest.raises(FloatingPointError, match="overflow"):
-        get_flame_residence_time(1e-310, 1, 1, "sec")
+        get_flame_residence_time(1e-310, 1, 1, "sec", backend="python")
 
 
 def test_canopy_warning_stops_calculation_before_numpy_error_callback():
@@ -51,6 +51,6 @@ def test_canopy_warning_stops_calculation_before_numpy_error_callback():
     with np.errstate(over="call", call=raise_from_callback), warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
         with pytest.raises(UserWarning, match="canopy_ht"):
-            get_mid_flame_ws(20, 1e308, 0, -5, units="IMP")
+            get_mid_flame_ws(20, 1e308, 0, -5, units="IMP", backend="python")
 
     assert not callback_errors

@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.9.6,<2"]
+build-backend = "maturin"
 
 [project]
 name = "flame-components"
@@ -43,14 +43,12 @@ test = ["pytest>=7.0"]
 [dependency-groups]
 dev = ["pytest>=7.0"]
 
-[tool.hatch.version]
-source = "vcs"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/flame_components"]
-
-[tool.hatch.build.targets.sdist]
-exclude = ["archive"]
+[tool.maturin]
+manifest-path = "rust/crates/flame-components-py/Cargo.toml"
+module-name = "flame_components._native"
+python-source = "src"
+features = ["pyo3/extension-module"]
+locked = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

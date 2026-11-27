@@ -12,6 +12,7 @@ readme = "README.md"
 exclude = ["tests/reference.rs"]
 
 [dependencies]
+half = "=2.4.1"
 ndarray.workspace = true
 
 [dev-dependencies]

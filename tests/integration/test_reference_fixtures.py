@@ -1,4 +1,4 @@
-"""Compare the public NumPy backend with results from the pinned reference."""
+"""Compare public calculation backends with results from the pinned reference."""
 
 import json
 import sys
@@ -93,7 +93,7 @@ def assert_output(actual, case):
 
 
 @pytest.mark.parametrize("case", CASES, ids=[case["id"] for case in CASES])
-def test_public_python_backend_matches_pinned_reference(case):
+def test_public_backend_matches_pinned_reference(case, calculation_backend):
     function = getattr(flame_components, case["function"])
     inputs = {name: decode(value) for name, value in case["inputs"].items()}
 
@@ -104,11 +104,11 @@ def test_public_python_backend_matches_pinned_reference(case):
             error = case["error"]
             with pytest.raises(ERROR_TYPES[error["category"]]) as raised:
                 call_line = sys._getframe().f_lineno + 1
-                function(**inputs, backend="python")
+                function(**inputs, backend=calculation_backend)
             assert str(raised.value) == error["message"]
         else:
             call_line = sys._getframe().f_lineno + 1
-            actual = function(**inputs, backend="python")
+            actual = function(**inputs, backend=calculation_backend)
             assert_output(actual, case)
 
     observed = [

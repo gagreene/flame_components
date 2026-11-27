@@ -4,6 +4,7 @@ use std::f64::consts::FRAC_PI_2;
 
 use ndarray::{ArrayD, ArrayViewD};
 
+use crate::precision::Precision;
 use crate::{array::broadcast, Cell, Error, SlopeUnits};
 
 /// Fire classes used by the Nelson flame-height model.
@@ -31,15 +32,6 @@ impl TryFrom<f64> for FireType {
 impl From<FireType> for Cell<f64> {
     fn from(fire_type: FireType) -> Self {
         Self::present(f64::from(fire_type as u8))
-    }
-}
-
-impl SlopeUnits {
-    pub(crate) fn radians(self, slope: Cell<f64>) -> Cell<f64> {
-        match self {
-            Self::Degrees => slope.radians(),
-            Self::Percent => (slope / 100.0).atan(),
-        }
     }
 }
 
@@ -75,19 +67,43 @@ fn nelson_height(
     fire_type: Cell<f64>,
     fire_intensity: Cell<f64>,
     midflame_ws: Cell<f64>,
+    precision: [Precision; 3],
 ) -> Cell<f64> {
+    let [product, division, selected] = precision;
     // The reference membership test returns false for masked fire types.
     let coefficient = if !fire_type.masked && matches!(fire_type.value, 1.0 | 2.0) {
         1.0 / 360.0
     } else {
         0.0175
     };
-    let height = Cell::select(
+    let height = selected.convert(Cell::select(
         midflame_ws.eq_cell(0.0),
         flame_length,
-        coefficient * fire_intensity / midflame_ws,
-    );
+        division.div(product.mul(coefficient.into(), fire_intensity), midflame_ws),
+    ));
     Cell::select(height.gt(flame_length), flame_length, height)
+}
+
+/// Broadcast Nelson height with widths in bytes for the coefficient product,
+/// division by wind speed, and the selected height at zero or nonzero wind.
+pub fn nelson_height_array_with_precision(
+    flame_length: ArrayViewD<'_, Cell<f64>>,
+    fire_type: ArrayViewD<'_, Cell<f64>>,
+    fire_intensity: ArrayViewD<'_, Cell<f64>>,
+    midflame_ws: ArrayViewD<'_, Cell<f64>>,
+    widths: [u8; 3],
+) -> Result<ArrayD<Cell<f64>>, Error> {
+    fire_type.iter().copied().try_for_each(validate_fire_type)?;
+    let precision = Precision::widths(widths)?;
+    broadcast(
+        [
+            flame_length.view(),
+            fire_type.view(),
+            fire_intensity.view(),
+            midflame_ws.view(),
+        ],
+        |[length, kind, intensity, wind]| nelson_height(length, kind, intensity, wind, precision),
+    )
 }
 
 fn finney_height(
@@ -95,14 +111,35 @@ fn finney_height(
     flame_tilt: Cell<f64>,
     slope_angle: Cell<f64>,
     slope_units: SlopeUnits,
+    precision: [Precision; 8],
 ) -> Cell<f64> {
-    let slope_rad = slope_units.radians(slope_angle);
-    let tilt_h = FRAC_PI_2 - flame_tilt.radians();
-    let right_angle = Cell::present(90.0).radians();
+    let [tilt_rad, horizontal, slope, flat, difference, product, complement, quotient] = precision;
+    let slope_rad = slope.slope(slope_angle, slope_units);
+    let tilt_h = horizontal.sub(FRAC_PI_2.into(), tilt_rad.radians(flame_tilt));
+    let tilted = difference.sin(difference.sub(tilt_h, slope_rad));
+    let denominator = complement.sin(complement.sub(FRAC_PI_2.into(), slope_rad));
     Cell::select(
         slope_angle.le(1.0),
-        flame_length * tilt_h.sin(),
-        flame_length * (tilt_h - slope_rad).sin() / (right_angle - slope_rad).sin(),
+        flat.mul(flame_length, horizontal.sin(tilt_h)),
+        quotient.div(product.mul(flame_length, tilted), denominator),
+    )
+}
+
+/// Broadcast Finney height with independently selected floating-point widths.
+///
+/// Widths in bytes describe tilt radians, horizontal tilt, slope radians, flat
+/// product, angle difference, slope product, slope complement, and final division.
+pub fn finney_height_array_with_precision(
+    length: ArrayViewD<'_, Cell<f64>>,
+    tilt: ArrayViewD<'_, Cell<f64>>,
+    slope: ArrayViewD<'_, Cell<f64>>,
+    units: SlopeUnits,
+    widths: [u8; 8],
+) -> Result<ArrayD<Cell<f64>>, Error> {
+    let precision = Precision::widths(widths)?;
+    broadcast(
+        [length.view(), tilt.view(), slope.view()],
+        |[length, tilt, slope]| finney_height(length, tilt, slope, units, precision),
     )
 }
 
@@ -125,6 +162,7 @@ pub fn flame_height(
                 fire_type,
                 fire_intensity,
                 midflame_ws,
+                [Precision::Double; 3],
             ))
         }
         HeightModel::Finney {
@@ -136,6 +174,7 @@ pub fn flame_height(
             flame_tilt,
             slope_angle,
             slope_units,
+            [Precision::Double; 8],
         )),
     }
 }
@@ -151,25 +190,23 @@ pub fn flame_height_array(
             fire_type,
             fire_intensity,
             midflame_ws,
-        } => {
-            fire_type.iter().copied().try_for_each(validate_fire_type)?;
-            broadcast(
-                [
-                    flame_length.view(),
-                    fire_type.view(),
-                    fire_intensity.view(),
-                    midflame_ws.view(),
-                ],
-                |[length, kind, intensity, wind]| nelson_height(length, kind, intensity, wind),
-            )
-        }
+        } => nelson_height_array_with_precision(
+            flame_length,
+            fire_type,
+            fire_intensity,
+            midflame_ws,
+            [8; 3],
+        ),
         HeightModel::Finney {
             flame_tilt,
             slope_angle,
             slope_units,
-        } => broadcast(
-            [flame_length.view(), flame_tilt.view(), slope_angle.view()],
-            |[length, tilt, slope]| finney_height(length, tilt, slope, slope_units),
+        } => finney_height_array_with_precision(
+            flame_length,
+            flame_tilt,
+            slope_angle,
+            slope_units,
+            [8; 8],
         ),
     }
 }

@@ -53,6 +53,14 @@ and test it without a Python environment.
 cargo test --locked --manifest-path rust/Cargo.toml
 ```
 
+## Standalone command line
+
+Build the executable with `cargo build --release --locked --manifest-path
+rust/Cargo.toml -p flame-components-cli`. For example,
+`flame-components flame-depth --ros 3 --res-time 2` prints `6`.
+The CLI accepts scalar flags and scalar JSON from a file or standard input.
+[CLI reference](rust/crates/flame-components-cli/README.md)
+
 ## Usage
 
 ### Key Functions
@@ -127,8 +135,10 @@ missing model-specific required parameter.
 
 Every calculation and the multiprocessing helper accepts a keyword-only
 `backend` argument. The default `"auto"` and explicit `"python"` both use NumPy
-in this release. Selecting `"rust"` requires a build that includes the native
-extension.
+in this prerelease. Use `backend="rust"` to run the equations with the compiled
+extension. The Python backend supports extended-precision NumPy inputs and
+Finney tilt with integer lengths outside the Rust adapter's exact binary64
+range.
 
 The NumPy backend suppresses incidental arithmetic warnings. Explicit NumPy
 error modes such as `over="raise"` still apply. The package reports
