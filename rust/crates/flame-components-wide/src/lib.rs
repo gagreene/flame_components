@@ -2,6 +2,8 @@
 //!
 //! Values cross the Rust/C boundary as native-endian byte buffers. C owns the
 //! floating-point representation, alignment, arithmetic and direct conversions.
+//! Call [`format`] before exchanging native long double bytes. An all-zero
+//! format identifies an unsupported ABI with a local binary64 placeholder.
 
 use std::cmp::Ordering;
 use std::ffi::c_int;
@@ -9,7 +11,7 @@ use std::ffi::c_int;
 /// Maximum object size across the supported C long double representations.
 pub const BYTE_CAPACITY: usize = 16;
 
-/// A native long double with zeroed padding.
+/// A native long double with zeroed padding on supported ABIs.
 #[derive(Clone, Copy, Debug)]
 pub struct LongDouble([u8; BYTE_CAPACITY]);
 
@@ -26,6 +28,7 @@ extern "C" {
 
 /// Returns the native object size, significand bits (including the integer bit),
 /// minimum normal binary exponent and exclusive maximum binary exponent.
+/// Returns `(0, 0, 0, 0)` when native long double interchange is unavailable.
 pub fn format() -> (usize, u32, i32, i32) {
     let (mut precision, mut min_exp, mut max_exp) = (0, 0, 0);
     // SAFETY: Each pointer refers to a distinct writable C int for this call.

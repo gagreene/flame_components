@@ -244,7 +244,7 @@ pub fn flame_tilt(model: TiltModel<Cell<f64>>) -> Result<Cell<f64>, Error> {
             flame_height,
             slope_angle,
             slope_units,
-            [Precision::Double; 7],
+            [Precision::DOUBLE; 7],
             flame_height.eq_cell(flame_length),
         )),
         TiltModel::Butler {
@@ -257,7 +257,7 @@ pub fn flame_tilt(model: TiltModel<Cell<f64>>) -> Result<Cell<f64>, Error> {
                 wind_speed,
                 wind_speed_units,
                 canopy_ht,
-                [Precision::Double; 10],
+                [Precision::DOUBLE; 10],
             ))
         }
     }

@@ -76,7 +76,7 @@ pub fn mid_flame_ws(
         canopy_ht,
         canopy_baseht,
         units,
-        [Precision::Double; 18],
+        [Precision::DOUBLE; 18],
     )
 }
 

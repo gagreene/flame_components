@@ -27,7 +27,7 @@ pub fn flame_residence_time(
         fuel_consumption,
         midflame_ws,
         units,
-        [Precision::Double; 7],
+        [Precision::DOUBLE; 7],
     )
 }
 

@@ -53,3 +53,27 @@ fn a_single_precision_stage_can_mask_a_wide_residence_result() {
     mixed[2] = 4;
     assert!(residence(mixed).masked);
 }
+
+#[test]
+fn residence_division_uses_the_numerators_cutoff_precision() {
+    let width = format().0 as u8;
+    let ros = arr0(Cell::present(LongDouble::from_f64(3e-307)));
+    let one = arr0(Cell::present(LongDouble::from_f64(1.0)));
+    let residence = |flag: u8| {
+        let widths = [4, 4, 4, 4, width, width | (flag << 5), width];
+        flame_residence_time_array_with_precision(
+            ros.view().into_dyn(),
+            one.view().into_dyn(),
+            one.view().into_dyn(),
+            ResidenceUnits::Seconds,
+            widths,
+        )
+        .unwrap()[[]]
+    };
+    assert!(residence(0).masked);
+    let single_cutoff = residence(1);
+    assert!(!single_cutoff.masked);
+    assert!((single_cutoff.value.to_f64() / 7.8e307 - 1.0).abs() < 1e-6);
+    assert!(residence(2).masked);
+    assert!(residence(3).masked);
+}

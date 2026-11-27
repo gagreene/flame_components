@@ -188,9 +188,9 @@ mod tests {
         let infinity = Cell::input(f64::INFINITY);
         assert!(!(infinity * 0.0).masked);
         assert!((infinity * 0.0).value.is_nan());
-        assert!(crate::precision::Precision::Double.sqrt(infinity).masked);
+        assert!(crate::precision::Precision::DOUBLE.sqrt(infinity).masked);
         assert!(
-            crate::precision::Precision::Double
+            crate::precision::Precision::DOUBLE
                 .log(Cell::present(0.0))
                 .masked
         );

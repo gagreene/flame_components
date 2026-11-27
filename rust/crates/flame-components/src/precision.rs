@@ -52,19 +52,76 @@ pub(crate) trait Stage<T: ModelValue>: Copy {
     }
 }
 
+/// NumPy's safe-divide cutoff can have a different dtype from the quotient.
+/// The low five bits encode the quotient width in bytes. The upper bits select
+/// the cutoff arithmetic; zero preserves explicit-width Rust caller behavior.
 #[derive(Clone, Copy)]
-pub(crate) enum Precision {
+pub(crate) enum DivideCutoff {
+    Legacy,
+    RoundedToZero,
+    Double,
+    Native,
+}
+
+impl DivideCutoff {
+    pub(crate) fn decode(stage: u8) -> Result<(u8, Self), Error> {
+        let cutoff = match stage >> 5 {
+            0 => Self::Legacy,
+            1 => Self::RoundedToZero,
+            2 => Self::Double,
+            3 => Self::Native,
+            _ => return Err(Error::InvalidFloatWidth(stage)),
+        };
+        Ok((stage & 31, cutoff))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Width {
     Half,
     Single,
     Double,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct Precision {
+    width: Width,
+    cutoff: DivideCutoff,
+}
+
 impl Precision {
+    pub(crate) const DOUBLE: Self = Self {
+        width: Width::Double,
+        cutoff: DivideCutoff::Legacy,
+    };
+
+    fn from_stage(stage: u8) -> Result<Self, Error> {
+        let (width, cutoff) = DivideCutoff::decode(stage)?;
+        let width = match width {
+            2 => Width::Half,
+            4 => Width::Single,
+            8 => Width::Double,
+            _ => return Err(Error::InvalidFloatWidth(stage)),
+        };
+        Ok(Self { width, cutoff })
+    }
+
+    #[cfg(feature = "extended")]
+    pub(crate) fn is_single(self) -> bool {
+        matches!(self.width, Width::Single)
+    }
+
+    pub(crate) fn quotient(self, left: Cell<f64>, right: Cell<f64>) -> Cell<f64> {
+        let mut result = self.binary(left, right, |a, b| a / b);
+        result.masked |= !result.value.is_finite();
+        result
+    }
+
     fn cast(self, value: f64) -> f64 {
-        match self {
-            Self::Half => f16::from_f64(value).to_f64(),
-            Self::Single => f64::from(value as f32),
-            Self::Double => value,
+        match self.width {
+            Width::Half => f16::from_f64(value).to_f64(),
+            Width::Single => f64::from(value as f32),
+            Width::Double => value,
         }
     }
 
@@ -74,8 +131,8 @@ impl Precision {
         single: impl FnOnce(f32) -> f32,
         double: impl FnOnce(f64) -> f64,
     ) -> Cell<f64> {
-        input.map(|value| match self {
-            Self::Double => double(value),
+        input.map(|value| match self.width {
+            Width::Double => double(value),
             _ => self.cast(f64::from(single(self.cast(value) as f32))),
         })
     }
@@ -95,14 +152,9 @@ impl Precision {
 
 impl Stage<f64> for Precision {
     fn widths<const N: usize>(widths: [u8; N]) -> Result<[Self; N], Error> {
-        let mut result = [Self::Double; N];
-        for (slot, width) in result.iter_mut().zip(widths) {
-            *slot = match width {
-                2 => Self::Half,
-                4 => Self::Single,
-                8 => Self::Double,
-                _ => return Err(Error::InvalidFloatWidth(width)),
-            };
+        let mut result = [Self::DOUBLE; N];
+        for (slot, stage) in result.iter_mut().zip(widths) {
+            *slot = Self::from_stage(stage)?;
         }
         Ok(result)
     }
@@ -124,10 +176,18 @@ impl Stage<f64> for Precision {
     }
 
     fn div(self, left: Cell<f64>, right: Cell<f64>) -> Cell<f64> {
-        let left = left.map(|x| self.cast(x));
-        let right = right.map(|x| self.cast(x));
-        let mut quotient = (left / right).map(|x| self.cast(x));
-        quotient.masked |= !quotient.value.is_finite();
+        let mut quotient = self.quotient(left, right);
+        if !quotient.masked {
+            quotient.masked = match self.cutoff {
+                DivideCutoff::RoundedToZero => false,
+                DivideCutoff::Legacy => {
+                    self.cast(left.value).abs() * f64::MIN_POSITIVE >= self.cast(right.value).abs()
+                }
+                DivideCutoff::Double | DivideCutoff::Native => {
+                    left.value.abs() * f64::MIN_POSITIVE >= right.value.abs()
+                }
+            };
+        }
         quotient
     }
 

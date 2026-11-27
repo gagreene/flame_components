@@ -4,7 +4,12 @@ use std::cmp::Ordering;
 #[test]
 fn arithmetic_resolves_one_native_ulp() {
     let one = LongDouble::from_f64(1.0);
-    let (_, precision, min_exp, max_exp) = format();
+    let (size, precision, min_exp, max_exp) = format();
+    if size == 0 {
+        assert_eq!((precision, min_exp, max_exp), (0, 0, 0));
+        assert_eq!(one.add(one).to_f64(), 2.0);
+        return;
+    }
     assert!(matches!(
         (precision, min_exp, max_exp),
         (53, -1022, 1024) | (64 | 113, -16382, 16384)
@@ -26,7 +31,11 @@ fn arithmetic_resolves_one_native_ulp() {
 #[test]
 fn raw_bytes_ignore_padding_and_keep_negative_zero() {
     let (size, precision, _, _) = format();
-    let meaningful = if precision == 64 { 10 } else { size };
+    let meaningful = match (size, precision) {
+        (0, _) => std::mem::size_of::<f64>(),
+        (_, 64) => 10,
+        _ => size,
+    };
     let mut bytes = LongDouble::from_f64(-0.0).to_bytes();
     bytes[meaningful..].fill(0xab);
     let value = LongDouble::from_bytes(bytes);

@@ -191,7 +191,7 @@ pub fn flame_height(
                 fire_type,
                 fire_intensity,
                 midflame_ws,
-                [Precision::Double; 3],
+                [Precision::DOUBLE; 3],
             ))
         }
         HeightModel::Finney {
@@ -203,7 +203,7 @@ pub fn flame_height(
             flame_tilt,
             slope_angle,
             slope_units,
-            [Precision::Double; 8],
+            [Precision::DOUBLE; 8],
         )),
     }
 }

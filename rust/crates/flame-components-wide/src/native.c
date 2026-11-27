@@ -7,45 +7,69 @@
 /* Rust supplies initialized, unaligned 16-byte buffers. Only copy value bytes
  * from C objects: x87 long double may have up to six indeterminate pad bytes. */
 #define CAPACITY 16
-#if CHAR_BIT != 8 || FLT_RADIX != 2
-#error Unsupported long double representation
-#elif LDBL_MANT_DIG == 53 && LDBL_MIN_EXP == -1021 && LDBL_MAX_EXP == 1024
+#if defined(__SIZEOF_LONG_DOUBLE__)
+#define LONG_DOUBLE_BYTES __SIZEOF_LONG_DOUBLE__
+#elif defined(_MSC_VER)
+#define LONG_DOUBLE_BYTES 8
+#else
+#define LONG_DOUBLE_BYTES 0
+#endif
+
+#if LONG_DOUBLE_BYTES == 8 && LDBL_MANT_DIG == 53 && \
+    LDBL_MIN_EXP == -1021 && LDBL_MAX_EXP == 1024
 #define VALUE_BYTES 8
 #define NATIVE_MATH(name) name
-#elif LDBL_MANT_DIG == 64 && LDBL_MIN_EXP == -16381 && LDBL_MAX_EXP == 16384 && (defined(__i386__) || defined(__x86_64__))
+#elif LONG_DOUBLE_BYTES >= 10 && LONG_DOUBLE_BYTES <= CAPACITY && \
+      LDBL_MANT_DIG == 64 && LDBL_MIN_EXP == -16381 && LDBL_MAX_EXP == 16384 && \
+      (defined(__i386__) || defined(__x86_64__))
 #define X87_EXTENDED 1
 #define VALUE_BYTES 10
 #define NATIVE_MATH(name) name##l
-#elif LDBL_MANT_DIG == 113 && LDBL_MIN_EXP == -16381 && LDBL_MAX_EXP == 16384
+#elif LONG_DOUBLE_BYTES == 16 && LDBL_MANT_DIG == 113 && \
+      LDBL_MIN_EXP == -16381 && LDBL_MAX_EXP == 16384
 #define VALUE_BYTES 16
 #define NATIVE_MATH(name) name##l
-#else
-#error Unsupported long double representation
 #endif
 
-/* A typedef assertion works with older MSVC C language modes. */
-#ifdef X87_EXTENDED
-typedef char native_size_check[(sizeof(long double) >= VALUE_BYTES &&
-                                sizeof(long double) <= CAPACITY) ? 1 : -1];
+/* Rust's f64 ABI requires an eight-byte binary64 C double in either mode. */
+typedef char double_abi_check[(CHAR_BIT == 8 && FLT_RADIX == 2 &&
+                               sizeof(double) == 8 && DBL_MANT_DIG == 53 &&
+                               DBL_MIN_EXP == -1021 && DBL_MAX_EXP == 1024) ? 1 : -1];
+
+#ifdef VALUE_BYTES
+typedef long double calculation_type;
+typedef char native_size_check[sizeof(long double) == LONG_DOUBLE_BYTES ? 1 : -1];
 #else
-typedef char native_size_check[sizeof(long double) == VALUE_BYTES ? 1 : -1];
+/* An unrecognized long double (e.g. IBM double-double) has no byte interchange
+ * here. Keep the library linkable for callers using the ordinary Rust kernels. */
+#define UNSUPPORTED_LONG_DOUBLE 1
+typedef double calculation_type;
+#define VALUE_BYTES sizeof(double)
+#define NATIVE_MATH(name) name
 #endif
 
-static long double load_value(const unsigned char *input) {
-    long double value = 0.0L;
+static calculation_type load_value(const unsigned char *input) {
+    calculation_type value = 0;
     memcpy(&value, input, VALUE_BYTES);
     return value;
 }
 
-static void store_value(unsigned char *output, long double value) {
+static void store_value(unsigned char *output, calculation_type value) {
     memcpy(output, &value, VALUE_BYTES);
 }
 
 size_t fc_wide_format(int *precision, int *min_exp, int *max_exp) {
+#ifdef UNSUPPORTED_LONG_DOUBLE
+    *precision = 0;
+    *min_exp = 0;
+    *max_exp = 0;
+    return 0;
+#else
     *precision = LDBL_MANT_DIG;
     *min_exp = LDBL_MIN_EXP - 1;
     *max_exp = LDBL_MAX_EXP;
     return sizeof(long double);
+#endif
 }
 
 void fc_wide_import(unsigned char *output, const unsigned char *input) {
@@ -57,7 +81,7 @@ void fc_wide_import(unsigned char *output, const unsigned char *input) {
         unsigned int exponent = ((input[9] & 0x7f) << 8) | input[8];
         int integer_bit = input[7] & 0x80;
         if (exponent != 0 && !integer_bit) {
-            store_value(output, (long double)NAN);
+            store_value(output, (calculation_type)NAN);
         } else if (exponent == 0 && integer_bit) {
             /* A pseudo-denormal has the same value as exponent one. */
             output[8] = 1;
@@ -67,7 +91,7 @@ void fc_wide_import(unsigned char *output, const unsigned char *input) {
 }
 
 void fc_wide_from_f64(unsigned char *output, double value) {
-    store_value(output, (long double)value);
+    store_value(output, (calculation_type)value);
 }
 
 double fc_wide_to_f64(const unsigned char *input) {
@@ -80,15 +104,15 @@ float fc_wide_to_f32(const unsigned char *input) {
 
 #define DEFINE_UNARY(name, expression)                                  \
     void fc_wide_##name(unsigned char *out, const unsigned char *in) {   \
-        long double a = load_value(in);                                 \
+        calculation_type a = load_value(in);                            \
         store_value(out, (expression));                                 \
     }
 
 #define DEFINE_BINARY(name, expression)                                 \
     void fc_wide_##name(unsigned char *out, const unsigned char *left,   \
                         const unsigned char *right) {                   \
-        long double a = load_value(left);                               \
-        long double b = load_value(right);                              \
+        calculation_type a = load_value(left);                          \
+        calculation_type b = load_value(right);                         \
         store_value(out, (expression));                                 \
     }
 
@@ -106,9 +130,9 @@ DEFINE_UNARY(acos, NATIVE_MATH(acos)(a))
 DEFINE_UNARY(abs, NATIVE_MATH(fabs)(a))
 
 /* NumPy rounds the conversion factor in the input dtype before multiplying. */
-#define PI 3.141592653589793238462643383279502884L
-DEFINE_UNARY(radians, a * (PI / 180.0L))
-DEFINE_UNARY(degrees, a * (180.0L / PI))
+#define PI ((calculation_type)3.141592653589793238462643383279502884L)
+DEFINE_UNARY(radians, a * (PI / 180))
+DEFINE_UNARY(degrees, a * (180 / PI))
 
 int fc_wide_is_nan(const unsigned char *input) {
     return isnan(load_value(input));
@@ -119,8 +143,8 @@ int fc_wide_is_finite(const unsigned char *input) {
 }
 
 int fc_wide_compare(const unsigned char *left, const unsigned char *right) {
-    long double a = load_value(left);
-    long double b = load_value(right);
+    calculation_type a = load_value(left);
+    calculation_type b = load_value(right);
     if (isnan(a) || isnan(b)) {
         return 2;
     }

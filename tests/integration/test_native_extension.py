@@ -229,3 +229,11 @@ def test_finney_shape_error_preserves_reference_operand_order(native):
         get_flame_tilt("Finney", length, height, slope, "degrees", backend="rust")
 
     assert str(rust_error.value) == str(python_error.value)
+
+
+@pytest.mark.parametrize("ros_dtype", [np.float64, np.longdouble])
+def test_division_cutoff_respects_original_numerator_dtype(native, ros_dtype):
+    ros = np.array([3e-307], dtype=ros_dtype)
+    fuel = np.array([1.0], dtype=np.float32)
+    wind = np.array([1.0], dtype=np.float32)
+    _compare(get_flame_residence_time, ros, fuel, wind, "sec")

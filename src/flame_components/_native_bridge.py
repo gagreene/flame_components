@@ -100,18 +100,10 @@ def run(equation, *args):
             isinstance(arg, np.ndarray) and _is_extended(arg.dtype) for arg in args
         )
         if wide_inputs:
-            if equation == "flame_tilt" and args[0] == "Standard":
-                precision = (dtype.itemsize,) * 7
             result = _extended(native, equation, args, precision, equality)
         else:
-            storage = np.dtype("float64")
-            if equation == "flame_tilt" and args[0] == "Standard":
-                if dtype == np.dtype("float16"):
-                    precision = (2,) * 7
-                else:
-                    storage = dtype.newbyteorder("=")
             inputs = tuple(
-                _buffers(arg, storage) if isinstance(arg, np.ndarray) else arg
+                _buffers(arg, np.dtype("float64")) if isinstance(arg, np.ndarray) else arg
                 for arg in args
             )
             options = {} if precision is None else {"precision": precision}

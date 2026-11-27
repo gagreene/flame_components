@@ -2,6 +2,9 @@
 //!
 //! A width of 2, 4, or 8 selects the existing binary16, binary32, or binary64
 //! kernel. A larger width must match the host long-double storage size.
+//! For division, the upper three bits can select the NumPy safe-divide cutoff
+//! precision: 0 uses the default, 1 rounds the tiny multiplier to zero,
+//! 2 uses binary64, and 3 uses the native long double.
 
 use ndarray::{ArrayD, ArrayViewD};
 
@@ -10,7 +13,7 @@ pub use flame_components_wide::{format, LongDouble, BYTE_CAPACITY};
 
 use crate::depth::DepthValue;
 use crate::length::LengthModel;
-use crate::precision::{ModelValue, Precision, Stage};
+use crate::precision::{DivideCutoff, ModelValue, Precision, Stage};
 use crate::residence::ResidenceUnits;
 use crate::wind::{WindError, WindResult, WindUnits};
 use crate::{Cell, Error, SlopeUnits, WindSpeedUnits};
@@ -44,15 +47,24 @@ impl ModelValue for LongDouble {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum LongDoubleStage {
+pub(crate) struct LongDoubleStage {
+    width: LongDoubleWidth,
+    cutoff: DivideCutoff,
+}
+
+#[derive(Clone, Copy)]
+enum LongDoubleWidth {
     Narrow(Precision),
     Native,
 }
 
 fn narrow(cell: Cell<LongDouble>, precision: Precision) -> Cell<f64> {
-    cell.map(|value| match precision {
-        Precision::Single => f64::from(value.to_f32()),
-        _ => value.to_f64(),
+    cell.map(|value| {
+        if precision.is_single() {
+            f64::from(value.to_f32())
+        } else {
+            value.to_f64()
+        }
     })
 }
 
@@ -64,9 +76,9 @@ fn finite(mut cell: Cell<LongDouble>) -> Cell<LongDouble> {
 macro_rules! unary_stage {
     ($method:ident, $domain:expr) => {
         fn $method(self, value: Cell<LongDouble>) -> Cell<LongDouble> {
-            match self {
-                Self::Narrow(p) => p.$method(narrow(value, p)).map(LongDouble::from_f64),
-                Self::Native => {
+            match self.width {
+                LongDoubleWidth::Narrow(p) => p.$method(narrow(value, p)).map(LongDouble::from_f64),
+                LongDoubleWidth::Native => {
                     let result = value.map(LongDouble::$method);
                     if $domain {
                         finite(result)
@@ -82,11 +94,11 @@ macro_rules! unary_stage {
 macro_rules! binary_stage {
     ($method:ident) => {
         fn $method(self, left: Cell<LongDouble>, right: Cell<LongDouble>) -> Cell<LongDouble> {
-            match self {
-                Self::Narrow(p) => p
+            match self.width {
+                LongDoubleWidth::Narrow(p) => p
                     .$method(narrow(left, p), narrow(right, p))
                     .map(LongDouble::from_f64),
-                Self::Native => Cell {
+                LongDoubleWidth::Native => Cell {
                     value: left.value.$method(right.value),
                     masked: left.masked || right.masked,
                 },
@@ -98,20 +110,27 @@ macro_rules! binary_stage {
 impl Stage<LongDouble> for LongDoubleStage {
     fn widths<const N: usize>(widths: [u8; N]) -> Result<[Self; N], Error> {
         let host_width = format().0;
-        let mut stages = [Self::Native; N];
-        for (stage, width) in stages.iter_mut().zip(widths) {
-            if width <= 8 || usize::from(width) != host_width {
+        let mut stages = [Self {
+            width: LongDoubleWidth::Native,
+            cutoff: DivideCutoff::Legacy,
+        }; N];
+        for (stage, entry) in stages.iter_mut().zip(widths) {
+            let (width, cutoff) = DivideCutoff::decode(entry)?;
+            let width = if width > 8 && usize::from(width) == host_width {
+                LongDoubleWidth::Native
+            } else {
                 let [narrow] = Precision::widths([width])?;
-                *stage = Self::Narrow(narrow);
-            }
+                LongDoubleWidth::Narrow(narrow)
+            };
+            *stage = Self { width, cutoff };
         }
         Ok(stages)
     }
 
     fn convert(self, cell: Cell<LongDouble>) -> Cell<LongDouble> {
-        match self {
-            Self::Native => cell,
-            Self::Narrow(p) => p.convert(narrow(cell, p)).map(LongDouble::from_f64),
+        match self.width {
+            LongDoubleWidth::Native => cell,
+            LongDoubleWidth::Narrow(p) => p.convert(narrow(cell, p)).map(LongDouble::from_f64),
         }
     }
 
@@ -120,28 +139,43 @@ impl Stage<LongDouble> for LongDoubleStage {
     binary_stage!(mul);
 
     fn div(self, left: Cell<LongDouble>, right: Cell<LongDouble>) -> Cell<LongDouble> {
-        match self {
-            Self::Narrow(p) => p
-                .div(narrow(left, p), narrow(right, p))
-                .map(LongDouble::from_f64),
-            Self::Native => {
-                // numpy.ma uses binary64's minimum normal even for long doubles.
-                let cutoff = left
-                    .value
-                    .abs()
-                    .mul(LongDouble::from_f64(f64::MIN_POSITIVE));
-                finite(Cell {
-                    value: left.value.div(right.value),
-                    masked: left.masked || right.masked || cutoff >= right.value.abs(),
-                })
+        let mut quotient = match self.width {
+            LongDoubleWidth::Narrow(p) => {
+                let (a, b) = (narrow(left, p), narrow(right, p));
+                if matches!(self.cutoff, DivideCutoff::Legacy) {
+                    return p.div(a, b).map(LongDouble::from_f64);
+                }
+                p.quotient(a, b).map(LongDouble::from_f64)
             }
+            LongDoubleWidth::Native => finite(Cell {
+                value: left.value.div(right.value),
+                masked: left.masked || right.masked,
+            }),
+        };
+        if !quotient.masked {
+            quotient.masked = match self.cutoff {
+                DivideCutoff::RoundedToZero => false,
+                DivideCutoff::Double => {
+                    LongDouble::from_f64(left.value.to_f64().abs() * f64::MIN_POSITIVE)
+                        >= right.value.abs()
+                }
+                DivideCutoff::Legacy | DivideCutoff::Native => {
+                    left.value
+                        .abs()
+                        .mul(LongDouble::from_f64(f64::MIN_POSITIVE))
+                        >= right.value.abs()
+                }
+            };
         }
+        quotient
     }
 
     fn pow(self, base: Cell<LongDouble>, exponent: f64) -> Cell<LongDouble> {
-        match self {
-            Self::Narrow(p) => p.pow(narrow(base, p), exponent).map(LongDouble::from_f64),
-            Self::Native => finite(base.map(|x| x.pow(LongDouble::from_f64(exponent)))),
+        match self.width {
+            LongDoubleWidth::Narrow(p) => {
+                p.pow(narrow(base, p), exponent).map(LongDouble::from_f64)
+            }
+            LongDoubleWidth::Native => finite(base.map(|x| x.pow(LongDouble::from_f64(exponent)))),
         }
     }
 
