@@ -1,0 +1,127 @@
+name: Python distributions
+
+on:
+  workflow_call:
+    inputs:
+      release-tag:
+        type: string
+        default: ''
+      release-prerelease:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.release-tag }}
+  RELEASE_PRERELEASE: ${{ inputs.release-prerelease }}
+
+jobs:
+  wheel:
+    name: Wheel (${{ matrix.os }}, Python ${{ matrix.python-version }}, ${{ matrix.numpy }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-15]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        numpy: [numpy]
+        include:
+          - os: ubuntu-22.04
+            python-version: "3.11"
+            numpy: numpy==1.23.2
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Build wheel with Maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: v1.9.6
+          rust-toolchain: "1.78.0"
+          # The action uses a container on Linux and the runner interpreter elsewhere.
+          manylinux: "2_28"
+          args: --release --out dist --interpreter ${{ runner.os == 'Linux' && format('python{0}', matrix.python-version) || 'python' }}
+
+      - name: Install wheel into a fresh environment
+        run: |
+          uv venv --python python "$RUNNER_TEMP/wheel-test"
+          uv pip install --python "$RUNNER_TEMP/wheel-test" dist/*.whl 'pytest>=7.0' "${{ matrix.numpy }}"
+
+      - name: Test the installed wheel with both backends
+        working-directory: ${{ runner.temp }}
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            python=./wheel-test/Scripts/python.exe
+          else
+            python=./wheel-test/bin/python
+          fi
+          if [[ "${{ matrix.numpy }}" == "numpy==1.23.2" ]]; then
+            "$python" -I -c "import numpy; assert numpy.__version__ == '1.23.2', numpy.__version__"
+          fi
+          "$python" -I "$GITHUB_WORKSPACE/scripts/smoke_test.py" --backend rust \
+            --cargo-manifest "$GITHUB_WORKSPACE/rust/Cargo.toml" \
+            --release-tag "$RELEASE_TAG" --release-prerelease "$RELEASE_PRERELEASE"
+          "$python" -I -m pytest -c "$GITHUB_WORKSPACE/pyproject.toml" -o pythonpath= \
+            "$GITHUB_WORKSPACE/tests" -v --tb=long -W error --calculation-backend=python
+          "$python" -I -m pytest -c "$GITHUB_WORKSPACE/pyproject.toml" -o pythonpath= \
+            "$GITHUB_WORKSPACE/tests" -v --tb=long -W error --calculation-backend=rust
+
+      - name: Upload validated wheel
+        if: inputs.release-tag != '' && matrix.numpy == 'numpy'
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: Source distribution
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@1.78.0
+
+      - uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Build source distribution
+        run: uv build --sdist --no-sources
+
+      - name: Install and smoke-test the source distribution
+        working-directory: ${{ runner.temp }}
+        run: |
+          uv venv --python python sdist-test
+          uv pip install --no-cache --python sdist-test "$GITHUB_WORKSPACE"/dist/*.tar.gz packaging
+          ./sdist-test/bin/python -I "$GITHUB_WORKSPACE/scripts/smoke_test.py" --backend rust \
+            --cargo-manifest "$GITHUB_WORKSPACE/rust/Cargo.toml" \
+            --release-tag "$RELEASE_TAG" --release-prerelease "$RELEASE_PRERELEASE"
+
+      - name: Upload validated source distribution
+        if: inputs.release-tag != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
