@@ -103,12 +103,28 @@ def test_nelson_preserves_scalar_coefficient_promotion(native):
     )
 
 
-def test_finney_rejects_integer_equality_beyond_native_precision(native):
-    with pytest.raises(TypeError, match="magnitudes at most"):
-        get_flame_tilt(
-            "Finney", np.array([2**53 + 1]), np.array([2**53]), 1.0, "degrees",
-            backend="rust",
-        )
+@pytest.mark.parametrize(("dtype", "large"), [(np.int64, 2**53), (np.uint64, 2**63)])
+def test_finney_uses_exact_integer_equality_and_operand_masks(native, dtype, large):
+    length = np.array([large + 1, large + 1, large + 1], dtype=dtype)
+    height = np.ma.array([large, large + 1, large], mask=[False, False, True], dtype=dtype)
+
+    expected = get_flame_tilt("Finney", length, height, -10.0, "degrees", backend="python")
+    actual = get_flame_tilt("Finney", length, height, -10.0, "degrees", backend="rust")
+
+    assert expected[0] > 19
+    assert expected[1] == 0
+    assert np.isnan(expected[2])
+    np.testing.assert_allclose(actual, expected, rtol=2e-14)
+
+
+def test_standard_tilt_respects_magnitude_dependent_zero_dimensional_dtype(native):
+    length = np.array(1e39)
+    height = np.array([1e38, 2e38], dtype=np.float32)
+    expected = get_flame_tilt("Standard", length, height, backend="python")
+    actual = get_flame_tilt("Standard", length, height, backend="rust")
+
+    assert actual.dtype == expected.dtype
+    np.testing.assert_allclose(actual, expected, rtol=2e-14)
 
 
 @pytest.mark.skipif(np.dtype(np.longdouble).itemsize <= 8, reason="binary64 longdouble")
@@ -127,3 +143,16 @@ def test_native_boolean_buffers_accept_noncanonical_numpy_true(native):
     )
     np.testing.assert_array_equal(result[:2], [False, True])
     np.testing.assert_array_equal(result_mask, [False, False, True])
+
+
+def test_finney_shape_error_preserves_reference_operand_order(native):
+    length = np.ones(3)
+    height = np.ones(2)
+    slope = np.ones(4)
+
+    with pytest.raises(ValueError, match="broadcast") as python_error:
+        get_flame_tilt("Finney", length, height, slope, "degrees", backend="python")
+    with pytest.raises(ValueError, match="broadcast") as rust_error:
+        get_flame_tilt("Finney", length, height, slope, "degrees", backend="rust")
+
+    assert str(rust_error.value) == str(python_error.value)

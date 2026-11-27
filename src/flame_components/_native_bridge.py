@@ -46,15 +46,14 @@ def _active_inputs(equation, args):
     return args
 
 
-def _check_finney_lengths(args):
-    for arg in args[1:3]:
-        if (
-            arg.dtype.kind in "iu"
-            and arg.dtype.itemsize == 8
-            and (ma.any(arg > 2**53) or (arg.dtype.kind == "i" and ma.any(arg < -(2**53))))
-        ):
-            raise TypeError("The Rust backend requires Finney tilt integer magnitudes at most 2**53")
-
+def _finney_equality(length, height):
+    # Equality must use the original NumPy dtypes before Rust receives f64 inputs.
+    try:
+        np.broadcast_shapes(length.shape, height.shape)
+    except ValueError:
+        # Let the Rust kernel report the incompatible operands in equation order.
+        return None
+    return _buffers(height == length, np.dtype("bool"))
 
 
 def run(equation, *args):
@@ -66,8 +65,6 @@ def run(equation, *args):
         result, dtype = _depth(native, args)
     else:
         args = _active_inputs(equation, args)
-        if equation == "flame_tilt" and args[0] == "Finney":
-            _check_finney_lengths(args)
         for arg in args:
             if isinstance(arg, np.ndarray) and arg.dtype.kind == "f" and arg.dtype.itemsize > 8:
                 raise TypeError("The Rust backend does not support extended-precision inputs")
@@ -81,7 +78,10 @@ def run(equation, *args):
                 storage = dtype.newbyteorder("=")
         inputs = tuple(_buffers(arg, storage) if isinstance(arg, np.ndarray) else arg for arg in args)
         kernel = getattr(native, equation)
-        result = kernel(*inputs) if precision is None else kernel(*inputs, precision=precision)
+        options = {} if precision is None else {"precision": precision}
+        if equation == "flame_tilt" and args[0] == "Finney":
+            options["equality"] = _finney_equality(args[1], args[2])
+        result = kernel(*inputs, **options)
 
     data, mask, substituted = result
     return _return_array(data, mask, dtype), substituted

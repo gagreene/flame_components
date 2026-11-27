@@ -7,13 +7,40 @@ pub(crate) fn broadcast<T: Copy, U, const N: usize>(
     inputs: [ArrayViewD<'_, T>; N],
     mut evaluate: impl FnMut([T; N]) -> U,
 ) -> Result<ArrayD<U>, Error> {
-    let incompatible = || Error::IncompatibleShapes {
-        shapes: inputs.iter().map(|input| input.shape().to_vec()).collect(),
+    broadcast_inner(inputs, None::<ArrayViewD<'_, ()>>, |cells, _| {
+        evaluate(cells)
+    })
+}
+
+/// Broadcast one differently typed input alongside the other inputs.
+pub(crate) fn broadcast_with_extra<T: Copy, E: Copy, U, const N: usize>(
+    inputs: [ArrayViewD<'_, T>; N],
+    extra: ArrayViewD<'_, E>,
+    mut evaluate: impl FnMut([T; N], E) -> U,
+) -> Result<ArrayD<U>, Error> {
+    broadcast_inner(inputs, Some(extra), |cells, extra| {
+        evaluate(cells, extra.expect("the extra input was provided"))
+    })
+}
+
+fn broadcast_inner<T: Copy, E: Copy, U, const N: usize>(
+    inputs: [ArrayViewD<'_, T>; N],
+    extra: Option<ArrayViewD<'_, E>>,
+    mut evaluate: impl FnMut([T; N], Option<E>) -> U,
+) -> Result<ArrayD<U>, Error> {
+    let shapes = || {
+        inputs
+            .iter()
+            .map(|input| input.shape())
+            .chain(extra.iter().map(|input| input.shape()))
     };
-    let rank = inputs.iter().map(|input| input.ndim()).max().unwrap_or(0);
+    let incompatible = || Error::IncompatibleShapes {
+        shapes: shapes().map(<[usize]>::to_vec).collect(),
+    };
+    let rank = shapes().map(<[usize]>::len).max().unwrap_or(0);
     let mut shape = vec![1; rank];
-    for input in &inputs {
-        for (output_len, &input_len) in shape.iter_mut().rev().zip(input.shape().iter().rev()) {
+    for input in shapes() {
+        for (output_len, &input_len) in shape.iter_mut().rev().zip(input.iter().rev()) {
             if *output_len == 1 {
                 *output_len = input_len;
             } else if input_len != 1 && *output_len != input_len {
@@ -32,11 +59,20 @@ pub(crate) fn broadcast<T: Copy, U, const N: usize>(
         .iter()
         .map(|input| input.broadcast(dimension.clone()).ok_or_else(incompatible))
         .collect::<Result<Vec<_>, _>>()?;
+    let extra_view = extra
+        .as_ref()
+        .map(|input| input.broadcast(dimension.clone()).ok_or_else(incompatible))
+        .transpose()?;
     let mut cells = views.iter().map(|view| view.iter()).collect::<Vec<_>>();
+    let mut extra_cells = extra_view.as_ref().map(|view| view.iter());
     for _ in 0..length {
-        output.push(evaluate(std::array::from_fn(|index| {
+        let values = std::array::from_fn(|index| {
             *cells[index].next().expect("each view has the output shape")
-        })));
+        });
+        let extra_value = extra_cells
+            .as_mut()
+            .map(|cells| *cells.next().expect("the extra view has the output shape"));
+        output.push(evaluate(values, extra_value));
     }
     ArrayD::from_shape_vec(dimension, output).map_err(|_| too_large())
 }

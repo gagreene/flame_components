@@ -44,6 +44,10 @@ fn bool_bytes<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArrayDyn<
         .cast_into::<PyArrayDyn<u8>>()?)
 }
 
+fn read_bool_cells(buffers: &Buffers<'_>) -> PyResult<ArrayD<Cell<bool>>> {
+    read_with_mask(&bool_bytes(&buffers.0)?, &buffers.1, |value| value != 0)
+}
+
 fn read_with_mask<T: Element + Copy, U>(
     data: &Bound<'_, PyArrayDyn<T>>,
     mask: &Bound<'_, PyAny>,
@@ -133,8 +137,8 @@ fn bool_depth<'py>(
     ros: &Buffers<'py>,
     res_time: &Buffers<'py>,
 ) -> PyResult<Output<'py>> {
-    let ros = read_with_mask(&bool_bytes(&ros.0)?, &ros.1, |value| value != 0)?;
-    let res_time = read_with_mask(&bool_bytes(&res_time.0)?, &res_time.1, |value| value != 0)?;
+    let ros = read_bool_cells(ros)?;
+    let res_time = read_bool_cells(res_time)?;
     output(py, flame_depth_array(ros.view(), res_time.view()))
 }
 
@@ -313,7 +317,7 @@ fn flame_height<'py>(
     }
 }
 
-#[pyfunction(signature = (model, flame_length, flame_height, slope_angle, slope_units, wind_speed, wind_speed_units, canopy_ht, precision=None))]
+#[pyfunction(signature = (model, flame_length, flame_height, slope_angle, slope_units, wind_speed, wind_speed_units, canopy_ht, precision=None, *, equality=None))]
 #[allow(clippy::too_many_arguments)]
 fn flame_tilt<'py>(
     py: Python<'py>,
@@ -326,6 +330,7 @@ fn flame_tilt<'py>(
     wind_speed_units: Option<&str>,
     canopy_ht: Option<Buffers<'py>>,
     precision: Option<Bound<'py, PyAny>>,
+    equality: Option<Buffers<'py>>,
 ) -> PyResult<Output<'py>> {
     match model {
         "Standard" => {
@@ -359,20 +364,26 @@ fn flame_tilt<'py>(
             let flame_height = required_cells(flame_height.as_ref(), "flame_height")?;
             let slope_angle = required_cells(slope_angle.as_ref(), "slope_angle")?;
             let units = parse_slope_units(slope_units)?;
-            let result = match precision {
-                Some(widths) => tilt::finney_tilt_array_with_precision(
+            let widths = precision
+                .map(|widths| widths.extract::<[u8; 7]>())
+                .transpose()?
+                .unwrap_or([8; 7]);
+            let result = match equality {
+                Some(equality) => tilt::finney_tilt_array_with_equality(
                     flame_length.view(),
                     flame_height.view(),
                     slope_angle.view(),
                     units,
-                    widths.extract::<[u8; 7]>()?,
+                    widths,
+                    read_bool_cells(&equality)?.view(),
                 ),
-                None => tilt::flame_tilt_array(TiltModel::Finney {
-                    flame_length: flame_length.view(),
-                    flame_height: flame_height.view(),
-                    slope_angle: slope_angle.view(),
-                    slope_units: units,
-                }),
+                None => tilt::finney_tilt_array_with_precision(
+                    flame_length.view(),
+                    flame_height.view(),
+                    slope_angle.view(),
+                    units,
+                    widths,
+                ),
             };
             output_for(py, ShapeModel::FinneyTilt, result)
         }

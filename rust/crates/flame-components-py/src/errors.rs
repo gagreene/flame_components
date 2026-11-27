@@ -65,7 +65,7 @@ fn check_shape_order(model: ShapeModel, shapes: &[&[usize]]) -> Result<(), PyErr
         (ShapeModel::StandardTilt, &[length, height]) => {
             broadcast_shape(&[height, length])?;
         }
-        (ShapeModel::FinneyTilt, &[length, height, slope]) => {
+        (ShapeModel::FinneyTilt, &[length, height, slope, ..]) => {
             let numerator = broadcast_shape(&[height, slope])?;
             broadcast_shape(&[&numerator, length])?;
         }

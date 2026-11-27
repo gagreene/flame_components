@@ -136,9 +136,7 @@ missing model-specific required parameter.
 Every calculation and the multiprocessing helper accepts a keyword-only
 `backend` argument. The default `"auto"` and explicit `"python"` both use NumPy
 in this prerelease. Use `backend="rust"` to run the equations with the compiled
-extension. The Python backend supports extended-precision NumPy inputs and
-Finney tilt with integer lengths outside the Rust adapter's exact binary64
-range.
+extension. Use the Python backend for extended-precision NumPy inputs.
 
 The NumPy backend suppresses incidental arithmetic warnings. Explicit NumPy
 error modes such as `over="raise"` still apply. The package reports

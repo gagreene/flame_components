@@ -1,17 +1,24 @@
-"""Resolve NumPy operation dtypes without evaluating user data."""
+"""Resolve NumPy operation dtypes with scalar and one-cell probes."""
 
 from functools import lru_cache
 
 import numpy as np
 from numpy import ma
 
+_VALUE_DEPENDENT_SCALARS = np.lib.NumpyVersion(np.__version__) < "2.0.0"
+
 
 def _spec(array):
-    return array.dtype, min(array.ndim, 1)
+    # NumPy 1.x can choose a dtype based on the value of a zero-dimensional operand.
+    if _VALUE_DEPENDENT_SCALARS and array.ndim == 0:
+        return array.dtype, 0, ma.getdata(array).tobytes(), bool(ma.getmaskarray(array))
+    return array.dtype, min(array.ndim, 1), None, False
 
 
 def _sample(spec):
-    dtype, rank = spec
+    dtype, rank, scalar, masked = spec
+    if scalar is not None:
+        return ma.array(np.frombuffer(scalar, dtype=dtype).reshape(()), mask=masked)
     return ma.array(np.ones((1,) if rank else (), dtype=dtype))
 
 

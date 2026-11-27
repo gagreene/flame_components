@@ -4,8 +4,9 @@ use std::f64::consts::FRAC_PI_2;
 
 use ndarray::{ArrayD, ArrayViewD, NdFloat};
 
+use crate::array::{broadcast, broadcast_with_extra};
 use crate::precision::Precision;
-use crate::{array::broadcast, Cell, Error, SlopeUnits, WindSpeedUnits};
+use crate::{Cell, Error, SlopeUnits, WindSpeedUnits};
 
 /// Model-specific flame-tilt inputs, as cells or array views.
 #[derive(Clone, Copy, Debug)]
@@ -59,6 +60,7 @@ fn finney_tilt(
     slope_angle: Cell<f64>,
     slope_units: SlopeUnits,
     precision: [Precision; 7],
+    height_equals_length: Cell<bool>,
 ) -> Cell<f64> {
     let [slope, complement, product, ratio, horizontal, vertical, output] = precision;
     let slope_rad = slope.slope(slope_angle, slope_units);
@@ -70,7 +72,7 @@ fn finney_tilt(
         slope_rad,
     );
     output.degrees(Cell::select(
-        flame_height.eq_cell(flame_length),
+        height_equals_length,
         Cell::present(0.0),
         vertical.sub(FRAC_PI_2.into(), tilt_h),
     ))
@@ -89,7 +91,38 @@ pub fn finney_tilt_array_with_precision(
     let precision = Precision::widths(widths)?;
     broadcast(
         [length.view(), height.view(), slope.view()],
-        |[length, height, slope]| finney_tilt(length, height, slope, units, precision),
+        |[length, height, slope]| {
+            finney_tilt(
+                length,
+                height,
+                slope,
+                units,
+                precision,
+                height.eq_cell(length),
+            )
+        },
+    )
+}
+
+/// Broadcast Finney tilt with a masked height-equals-length predicate computed
+/// before converting the numeric inputs to binary64.
+///
+/// The floating-point widths are the same as in [`finney_tilt_array_with_precision`].
+pub fn finney_tilt_array_with_equality(
+    length: ArrayViewD<'_, Cell<f64>>,
+    height: ArrayViewD<'_, Cell<f64>>,
+    slope: ArrayViewD<'_, Cell<f64>>,
+    units: SlopeUnits,
+    widths: [u8; 7],
+    equality: ArrayViewD<'_, Cell<bool>>,
+) -> Result<ArrayD<Cell<f64>>, Error> {
+    let precision = Precision::widths(widths)?;
+    broadcast_with_extra(
+        [length.view(), height.view(), slope.view()],
+        equality,
+        |[length, height, slope], equality| {
+            finney_tilt(length, height, slope, units, precision, equality)
+        },
     )
 }
 
@@ -174,6 +207,7 @@ pub fn flame_tilt(model: TiltModel<Cell<f64>>) -> Result<Cell<f64>, Error> {
             slope_angle,
             slope_units,
             [Precision::Double; 7],
+            flame_height.eq_cell(flame_length),
         )),
         TiltModel::Butler {
             wind_speed,
@@ -224,7 +258,8 @@ pub fn flame_tilt_array(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::{arr0, arr1};
+    use ndarray::{arr0, arr1, arr2, Axis, IxDyn};
+    use std::mem::size_of;
 
     #[test]
     fn standard_masks_height_greater_than_length() {
@@ -246,6 +281,51 @@ mod tests {
         })
         .unwrap();
         assert_eq!(result, Cell::present(0.0));
+    }
+
+    #[test]
+    fn finney_uses_equality_before_float_rounding() {
+        let boundary = 1_u64 << 53;
+        let length = arr0(Cell::present(boundary as f64));
+        let height = arr1(&[boundary, boundary + 1, boundary].map(|v| Cell::present(v as f64)));
+        let slope = arr2(&[[Cell::missing(0.0)], [Cell::present(-30.0)]]);
+        let mut equality = arr1(&[
+            Cell::missing(true),
+            Cell::present(false),
+            Cell::present(true),
+        ]);
+        equality.invert_axis(Axis(0));
+        let result = finney_tilt_array_with_equality(
+            length.view().into_dyn(),
+            height.view().into_dyn(),
+            slope.view().into_dyn(),
+            SlopeUnits::Degrees,
+            [8; 7],
+            equality.view().into_dyn(),
+        )
+        .unwrap();
+        assert_eq!(result[[0, 0]], Cell::present(0.0));
+        assert!(result[[0, 1]].masked);
+        assert!(!result[[1, 1]].masked);
+        assert!((result[[1, 1]].value - 60.0).abs() < 1e-12);
+        assert!(result[[1, 2]].masked);
+    }
+
+    #[test]
+    fn finney_rejects_oversized_equality_without_allocating_it() {
+        let scalar = arr0(Cell::present(1.0));
+        let predicate = arr0(Cell::present(true));
+        let shape = [isize::MAX as usize / size_of::<Cell<f64>>() + 1];
+        let equality = predicate.broadcast(IxDyn(&shape)).unwrap();
+        let result = finney_tilt_array_with_equality(
+            scalar.view().into_dyn(),
+            scalar.view().into_dyn(),
+            scalar.view().into_dyn(),
+            SlopeUnits::Degrees,
+            [8; 7],
+            equality,
+        );
+        assert!(matches!(result, Err(Error::OutputTooLarge { shape: actual }) if actual == shape));
     }
 
     #[test]
