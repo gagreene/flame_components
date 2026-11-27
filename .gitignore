@@ -68,3 +68,6 @@ Desktop.ini
 
 # Planning docs -- local reference only, not part of the public-facing repo
 development/
+
+# Cargo build output
+/rust/target/

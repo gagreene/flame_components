@@ -1,0 +1,18 @@
+[package]
+name = "flame-components"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Standalone flame characteristics for surface and crown fire models"
+
+readme = "README.md"
+# The repository-level fixture file is shared with the Python tests.
+exclude = ["tests/reference.rs"]
+
+[dependencies]
+ndarray.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
