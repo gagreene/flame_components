@@ -36,7 +36,12 @@ agents. The root `README.md`, where present, describes the project and its input
 5. Rewriting the history of a pushed branch (for example to remove a trailer) needs the
    owner's permission, `--force-with-lease=<branch>:<expected sha>`, a check that every tree
    is unchanged (`git rev-parse <commit>^{tree}` before and after), and a note to everyone with
-   a copy: `git fetch && git reset --hard origin/<branch>`.
+   a copy. After `git fetch origin`, check the worktree with `git status --short --branch` and
+   compare histories with `git log --left-right --oneline HEAD...origin/<branch>`. Save any
+   working changes and keep a backup branch at the old tip before reconciling. If the local
+   branch can fast-forward, run `git merge --ff-only origin/<branch>`. If histories diverge,
+   start a new local branch from `origin/<branch>` and reapply the local commits and saved
+   changes you still need.
 6. Other people and agents may be working on other branches or worktrees. Check `git status`
    and `git log` first, and do not switch branches or rewrite files you did not create without
    asking.

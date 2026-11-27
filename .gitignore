@@ -67,4 +67,5 @@ Thumbs.db
 Desktop.ini
 
 # Planning docs -- local reference only, not part of the public-facing repo
+docs/*-plan.md
 development/
