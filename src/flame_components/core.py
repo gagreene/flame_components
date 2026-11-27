@@ -178,11 +178,11 @@ def get_flame_height(model: str,
     else:
         _utils.require_inputs(model, flame_tilt=flame_tilt, slope_angle=slope_angle, slope_units=slope_units)
     flame_length = _utils.numeric_array("flame_length", flame_length)
-    if fire_type is not None:
+    if model == "Nelson":
         fire_type = _utils.fire_type_array(fire_type)
     fire_intensity = _utils.numeric_array("fire_intensity", fire_intensity, optional=True)
     midflame_ws = _utils.numeric_array("midflame_ws", midflame_ws, optional=True)
-    flame_tilt = _utils.numeric_array("flame_tilt", flame_tilt, optional=True)
+    flame_tilt = _utils.numeric_array("flame_tilt", flame_tilt, optional=True, scalar_as_float=True)
     slope_angle = _utils.numeric_array("slope_angle", slope_angle, optional=True)
     _utils.check_choice("slope_units", slope_units, ("degrees", "percent"), optional=True)
 
@@ -320,8 +320,8 @@ def flame_component_array_multiprocessing(flame_function: str,
                                         block_size: int | None = None,
                                         *, backend: str = "auto", **kwargs) -> list:
     """
-    Function breaks input arrays into blocks and processes each block with a different worker/processor.
-    Uses the function requested in the "flame_function" parameter.
+    Break input arrays into blocks and process them with a pool of worker processes.
+    Each block uses the function requested in the "flame_function" parameter.
 
     **flame_function options**
         "midflame_ws", "flame_length", "flame_height",
@@ -330,14 +330,14 @@ def flame_component_array_multiprocessing(flame_function: str,
     :param flame_function: The flame components function to implement.
     :param num_processors: Number of cores for multiprocessing
     :param block_size: Maximum rows per block (positive integer).
-        If block_size is None, an optimal block size will be estimated automatically.
+        If None, divide the row count by num_processors, round down, and use at least one row.
     :param backend: Calculation backend ("auto", "rust", or "python").
     :param kwargs: A dictionary of inputs for the requested flame_components function.
         The dictionary keys must match the required input parameters for the requested function.
         Refer to the function docstring for parameter requirements.
-    :return: List of per-block output arrays, in block order, including any final partial block.
-        NOTE: NOT concatenated into a single array — callers must call
-        ``numpy.concatenate()`` on the result themselves if a single array is needed.
+    :return: One result per block in input order, including any final partial block.
+        Use ``numpy.concatenate()`` to join numeric result arrays. The flame length
+        calculation returns a coefficient tuple per block when ``params_only=True``.
     """
     backend = _backend.resolve_backend(backend)
     function_name, row_count, num_processors = _blocks.prepare_blocks(flame_function, num_processors, kwargs)

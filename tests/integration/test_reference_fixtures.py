@@ -22,17 +22,10 @@ DEFAULT_INT_CASES = {
     "depth_integers",
     "depth_bool_and_int",
     "depth_zero_dimensional_and_scalar",
-    "depth_unsigned_wrap",
 }
 
-# The masked maximum used by the original clamp preserves these dtypes on NumPy 1.x.
-LEGACY_DTYPES = {
-    "depth_unsigned_wrap": "uint8",
-    "depth_uint64_wrap": "uint64",
-    "depth_reversed_nd_broadcast": "float32",
-    "residence_float32_ros": "float32",
-    "tilt_standard_float32": "float32",
-}
+# NumPy 1.x retains single precision for this mixed scalar/array calculation.
+LEGACY_DTYPES = {"residence_float32_ros": "float32"}
 
 
 def decode(value):
@@ -80,9 +73,7 @@ def assert_output(actual, case):
     assert actual.shape == tuple(output["shape"])
 
     actual = np.asarray(actual)
-    np.testing.assert_array_equal(
-        np.isnan(actual), np.array(case["clamped_mask"]).reshape(actual.shape)
-    )
+    np.testing.assert_array_equal(np.isnan(actual), np.isnan(expected))
     if case.get("rtol"):
         np.testing.assert_allclose(actual, expected, rtol=case["rtol"], atol=0)
     else:

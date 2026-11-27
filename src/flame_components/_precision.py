@@ -5,12 +5,11 @@ from functools import lru_cache
 import numpy as np
 from numpy import ma
 
-_VALUE_DEPENDENT_SCALARS = np.lib.NumpyVersion(np.__version__) < "2.0.0"
-
 
 def _spec(array):
-    # NumPy 1.x can choose a dtype based on the value of a zero-dimensional operand.
-    if _VALUE_DEPENDENT_SCALARS and array.ndim == 0:
+    # A 0-D operation can yield an ordinary scalar or a masked sentinel.
+    # NumPy 1.x also uses the scalar value when choosing a common dtype.
+    if array.ndim == 0:
         return array.dtype, 0, ma.getdata(array).tobytes(), bool(ma.getmaskarray(array))
     return array.dtype, min(array.ndim, 1), None, False
 
@@ -34,6 +33,11 @@ def _widths(*values, divisions=()):
         cutoff = np.abs(np.asarray(numerator)) * np.finfo(float).tiny
         width = cutoff.dtype.itemsize
         mode = 1 if width < 8 else 2 if width == 8 else 3
+        quotient = values[index]
+        # Masked array division adds its mask times the numerator back to
+        # the result when the cast is safe. This can change a zero's sign.
+        if quotient.ndim and np.can_cast(np.asarray(numerator).dtype, quotient.dtype, casting="safe"):
+            mode += 4
         widths[index] |= mode << 5
     return tuple(widths)
 
@@ -194,15 +198,12 @@ def _butler(wind, canopy, units):
 def _standard(length, height):
     length, height = map(_sample, (length, height))
     ratio = height / length
-    return _widths(ratio, divisions=[(0, height, length)]) * 7, ratio.dtype
+    output = np.degrees(ma.arccos(ratio))
+    return _widths(ratio, divisions=[(0, height, length)]) * 7, output.dtype
 
 
 def metadata(equation, args, parameters=None):
     """Return native arithmetic widths and the reference's raw output dtype."""
-    arrays = [arg for arg in args if isinstance(arg, np.ndarray)]
-    if all(array.dtype == np.dtype("float64") and array.ndim for array in arrays):
-        return None, np.dtype("float64")
-
     with np.errstate(all="ignore"):
         if equation == "mid_flame_ws":
             wind, cover, canopy, base, units = args

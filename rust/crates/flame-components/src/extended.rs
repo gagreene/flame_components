@@ -5,7 +5,8 @@
 //! For division, the upper three bits can select the NumPy safe-divide cutoff
 //! precision: 0 uses the default, 1 rounds the tiny multiplier to zero,
 //! 2 uses binary64, 3 uses the native long double, and 4 selects ordinary
-//! scalar division which only propagates existing masks.
+//! scalar division which only propagates existing masks. Modes 5–7 use the
+//! cutoffs from 1–3 and restore the zero sign after masked-array division.
 
 use ndarray::{ArrayD, ArrayViewD};
 
@@ -14,7 +15,7 @@ pub use flame_components_wide::{format, LongDouble, BYTE_CAPACITY};
 
 use crate::depth::DepthValue;
 use crate::length::LengthModel;
-use crate::precision::{DivideCutoff, ModelValue, Precision, Stage};
+use crate::precision::{DivideCutoff, Division, ModelValue, Precision, Stage};
 use crate::residence::ResidenceUnits;
 use crate::wind::{WindError, WindResult, WindUnits};
 use crate::{Cell, Error, SlopeUnits, WindSpeedUnits};
@@ -50,7 +51,7 @@ impl ModelValue for LongDouble {
 #[derive(Clone, Copy)]
 pub(crate) struct LongDoubleStage {
     width: LongDoubleWidth,
-    cutoff: DivideCutoff,
+    division: Division,
 }
 
 #[derive(Clone, Copy)]
@@ -113,17 +114,17 @@ impl Stage<LongDouble> for LongDoubleStage {
         let host_width = format().0;
         let mut stages = [Self {
             width: LongDoubleWidth::Native,
-            cutoff: DivideCutoff::Legacy,
+            division: Division::LEGACY,
         }; N];
         for (stage, entry) in stages.iter_mut().zip(widths) {
-            let (width, cutoff) = DivideCutoff::decode(entry)?;
+            let (width, division) = Division::decode(entry);
             let width = if width > 8 && usize::from(width) == host_width {
                 LongDoubleWidth::Native
             } else {
                 let [narrow] = Precision::widths([width])?;
                 LongDoubleWidth::Narrow(narrow)
             };
-            *stage = Self { width, cutoff };
+            *stage = Self { width, division };
         }
         Ok(stages)
     }
@@ -143,7 +144,7 @@ impl Stage<LongDouble> for LongDoubleStage {
         let mut quotient = match self.width {
             LongDoubleWidth::Narrow(p) => {
                 let (a, b) = (narrow(left, p), narrow(right, p));
-                if matches!(self.cutoff, DivideCutoff::Legacy) {
+                if matches!(self.division.cutoff, DivideCutoff::Legacy) {
                     return p.div(a, b).map(LongDouble::from_f64);
                 }
                 p.quotient(a, b).map(LongDouble::from_f64)
@@ -154,7 +155,7 @@ impl Stage<LongDouble> for LongDoubleStage {
             },
         };
         if !quotient.masked {
-            quotient.masked = match self.cutoff {
+            quotient.masked = match self.division.cutoff {
                 DivideCutoff::Scalar => false,
                 _ if !quotient.value.is_finite() => true,
                 DivideCutoff::RoundedToZero => false,
@@ -170,7 +171,7 @@ impl Stage<LongDouble> for LongDoubleStage {
                 }
             };
         }
-        quotient
+        self.division.finish(quotient, left.value)
     }
 
     fn pow(self, base: Cell<LongDouble>, exponent: f64) -> Cell<LongDouble> {

@@ -248,3 +248,26 @@ def test_depth_rounds_legacy_mixed_float16_inputs_before_multiplication(native, 
 
     assert actual.dtype == expected.dtype
     np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ("length", "intensity", "wind"),
+    [
+        (np.array(2.0, dtype="f2"), np.array(-np.inf, dtype="f2"), np.array(2.0)),
+        (np.array([2.0], dtype="f2"), np.array(0.0, dtype="f4"), np.ma.array(5.0, mask=True)),
+    ],
+)
+def test_masked_nelson_result_retains_reference_dtype(native, length, intensity, wind):
+    _compare(
+        get_flame_height, "Nelson", length, fire_type=np.array(1.0),
+        fire_intensity=intensity, midflame_ws=wind,
+    )
+
+
+def test_residence_division_preserves_reference_zero_sign(native):
+    args = (np.array(-3.0), np.array(-0.0, dtype="f2"), np.array([90.0], dtype="f2"), "sec")
+    expected = get_flame_residence_time(*args, backend="python")
+    measured = get_flame_residence_time(*args, backend="rust")
+
+    assert expected[0] == measured[0] == 0.0
+    np.testing.assert_array_equal(np.signbit(measured), np.signbit(expected))

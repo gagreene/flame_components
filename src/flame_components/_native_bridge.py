@@ -1,5 +1,7 @@
 """Convert normalized NumPy buffers to and from the Rust extension."""
 
+from itertools import zip_longest
+
 import numpy as np
 from numpy import ma
 
@@ -9,9 +11,17 @@ from . import _backend, _equations, _precision
 def _high_rank_shape(args):
     arrays = [arg for arg in args if isinstance(arg, np.ndarray)]
     # The native array view supports at most 32 dimensions. NumPy 2 allows 64.
-    if any(array.ndim > 32 for array in arrays):
-        return np.broadcast_shapes(*(array.shape for array in arrays))
-    return None
+    if not any(array.ndim > 32 for array in arrays):
+        return None
+    shapes = [array.shape for array in arrays]
+    result = []
+    for dimensions in zip_longest(*(reversed(shape) for shape in shapes), fillvalue=1):
+        lengths = {length for length in dimensions if length != 1}
+        if len(lengths) > 1:
+            operands = " ".join(map(str, shapes))
+            raise ValueError(f"operands could not be broadcast together with shapes {operands} ")
+        result.append(next(iter(lengths), 1))
+    return tuple(reversed(result))
 
 
 def _buffers(array, dtype, *, round_to=None, shape=None):
@@ -34,8 +44,6 @@ def _restore_shape(result, shape):
 
 
 def _return_array(data, mask, dtype):
-    if data.ndim == 0 and bool(mask):
-        return ma.masked
     with np.errstate(all="ignore"):
         return ma.array(data.astype(dtype, copy=False), mask=mask, copy=False)
 
@@ -104,11 +112,30 @@ def _active_inputs(equation, args):
 def _finney_equality(length, height):
     # Equality must use the original NumPy dtypes before Rust receives f64 inputs.
     try:
-        np.broadcast_shapes(length.shape, height.shape)
+        if _high_rank_shape((length, height)) is None:
+            np.broadcast_shapes(length.shape, height.shape)
     except ValueError:
         # Let the Rust kernel report the incompatible operands in equation order.
         return None
     return height == length
+
+
+def _raise_broadcast_error(equation, args, fallback):
+    """Preserve the first failing operation for incompatible high-rank shapes."""
+    with np.errstate(all="ignore"):
+        if equation == "mid_flame_ws":
+            speed, cover, canopy, base, units = args
+            speed, canopy, base, substituted = _equations.prepare_mid_flame_ws(
+                speed, canopy, base, units
+            )
+            try:
+                _equations.mid_flame_ws(speed, cover, canopy, base)
+            except ValueError as error:
+                error.substituted_canopy_height = substituted
+                raise
+        else:
+            getattr(_equations, equation)(*args)
+    raise fallback
 
 
 def run(equation, *args):
@@ -132,7 +159,10 @@ def run(equation, *args):
         if wide_inputs:
             result = _extended(native, equation, args, precision, equality)
         else:
-            shape = _high_rank_shape(args)
+            try:
+                shape = _high_rank_shape(args)
+            except ValueError as error:
+                _raise_broadcast_error(equation, args, error)
             inputs = tuple(
                 _buffers(arg, np.dtype("float64"), shape=shape) if isinstance(arg, np.ndarray) else arg
                 for arg in args
@@ -147,4 +177,7 @@ def run(equation, *args):
                 result = data, mask, substituted or bool(ma.any(args[2] == 0))
 
     data, mask, substituted = result
+    if equation == "flame_depth" and data.ndim == 0 and bool(mask):
+        # Masked scalar multiplication returns NumPy's float64 masked sentinel.
+        dtype = np.dtype("float64")
     return _return_array(data, mask, dtype), substituted

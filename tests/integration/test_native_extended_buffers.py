@@ -5,7 +5,7 @@ from importlib.util import find_spec
 import numpy as np
 import pytest
 
-from flame_components import get_flame_depth
+from flame_components import get_flame_depth, get_mid_flame_ws
 
 
 @pytest.fixture(scope="module")
@@ -116,12 +116,31 @@ def test_native_extended_depth_preserves_maximum_rank(native_format):
 @pytest.mark.parametrize("kind", ["int64", "float64", "longdouble"])
 def test_public_native_depth_preserves_maximum_rank(native_format, kind):
     _, _ = native_format
-    shape = (1,) * (_max_rank() - 1) + (2,)
-    ros = np.array([2, 5], dtype=kind).reshape(shape)
-    time = np.array(3, dtype=kind)
+    prefix = (1,) * (_max_rank() - 2)
+    shape = prefix + (2, 3)
+    ros = np.array([2, 5], dtype=kind).reshape(prefix + (2, 1))
+    time = np.array([3, 4, 5], dtype=kind).reshape(prefix + (1, 3))
     expected = get_flame_depth(ros, time, backend="python")
     actual = get_flame_depth(ros, time, backend="rust")
 
     assert actual.shape == expected.shape == shape
     assert actual.dtype == expected.dtype
     np.testing.assert_array_equal(actual, expected)
+
+
+def test_maximum_rank_wind_warns_before_broadcast_error(native_format):
+    canopy = np.array([0.0, 1.0]).reshape((1,) * (_max_rank() - 1) + (2,))
+    base = np.ones(3)
+
+    with (
+        pytest.warns(UserWarning, match="canopy_ht"),
+        pytest.raises(ValueError, match="broadcast") as python_error,
+    ):
+        get_mid_flame_ws(20, 50, canopy, base, backend="python")
+    with (
+        pytest.warns(UserWarning, match="canopy_ht"),
+        pytest.raises(ValueError, match="broadcast") as rust_error,
+    ):
+        get_mid_flame_ws(20, 50, canopy, base, backend="rust")
+
+    assert str(rust_error.value) == str(python_error.value)

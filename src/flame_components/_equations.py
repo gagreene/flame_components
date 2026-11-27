@@ -40,6 +40,10 @@ LENGTH_MODELS = {
 }
 
 
+# Preserve the original selector for existing callers.
+LENGTH_MODELS["Barbon_iNOWIND"] = LENGTH_MODELS["Barbon_NOWIND"]
+
+
 def prepare_mid_flame_ws(wind_speed, canopy_ht, canopy_baseht, units):
     # Convert input units
     if units == 'SI':

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-BASELINE = "7f9e0ea2899882f0f805b25bb7e23b842270d520"
+BASELINE = "13aaa128e749aa1bed68dd24f29efe521278b0a5"
 ROOT = Path(__file__).resolve().parents[3]
 FLOAT_TOLERANCE = 2e-14
 NELSON_BRANCHES = (("fire_type", [1, 2]), ("midflame_ws", 0), ("height", "flame_length"))
@@ -226,15 +226,14 @@ def trace_branch(condition, operands, frame):
 def capture(package, specification):
     name, function, inputs, rtol, branches = specification
     row = {"id": name, "function": function, "inputs": {k: encode(v) for k, v in inputs.items()}}
-    maximum = np.ma.maximum
+    nonnegative_result = package._utils.nonnegative_result
     where = np.ma.where
     observed_branches = []
 
-    def record_output(value, lower_bound):
+    def record_output(value, return_array):
         row["kernel_result"] = encode(value)
-        clamped = maximum(value, lower_bound)
-        row["clamped_mask"] = np.ma.getmaskarray(clamped).ravel().tolist()
-        return clamped
+        row["clamped_mask"] = np.ma.getmaskarray(value).ravel().tolist()
+        return nonnegative_result(value, return_array)
 
     def record_where(condition, yes, no):
         operands = branches[len(observed_branches)]
@@ -242,7 +241,7 @@ def capture(package, specification):
         return where(condition, yes, no)
 
     with warnings.catch_warnings(record=True) as captured, \
-            patch.object(np.ma, "maximum", record_output), \
+            patch.object(package._utils, "nonnegative_result", record_output), \
             patch.object(np.ma, "where", record_where if branches else where):
         warnings.simplefilter("always")
         try:

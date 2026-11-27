@@ -65,17 +65,46 @@ pub(crate) enum DivideCutoff {
     Scalar,
 }
 
-impl DivideCutoff {
-    pub(crate) fn decode(stage: u8) -> Result<(u8, Self), Error> {
-        let cutoff = match stage >> 5 {
-            0 => Self::Legacy,
-            1 => Self::RoundedToZero,
-            2 => Self::Double,
-            3 => Self::Native,
-            4 => Self::Scalar,
-            _ => return Err(Error::InvalidFloatWidth(stage)),
+#[derive(Clone, Copy)]
+pub(crate) struct Division {
+    pub(crate) cutoff: DivideCutoff,
+    restore_numerator: bool,
+}
+
+impl Division {
+    pub(crate) const LEGACY: Self = Self {
+        cutoff: DivideCutoff::Legacy,
+        restore_numerator: false,
+    };
+
+    pub(crate) fn decode(stage: u8) -> (u8, Self) {
+        let flag = stage >> 5;
+        let cutoff = match flag {
+            0 => DivideCutoff::Legacy,
+            1 | 5 => DivideCutoff::RoundedToZero,
+            2 | 6 => DivideCutoff::Double,
+            4 => DivideCutoff::Scalar,
+            _ => DivideCutoff::Native, // 3 or 7
         };
-        Ok((stage & 31, cutoff))
+        (
+            stage & 31,
+            Self {
+                cutoff,
+                restore_numerator: flag >= 5,
+            },
+        )
+    }
+
+    pub(crate) fn finish<T: ModelValue>(self, mut quotient: Cell<T>, numerator: T) -> Cell<T> {
+        // NumPy masked-array division adds mask * numerator back to the result.
+        // For an unmasked zero, adding a positive zero clears its sign bit.
+        if self.restore_numerator && !quotient.masked {
+            let zero = T::from_f64(0.0);
+            if quotient.value == zero && numerator.to_f64().is_sign_positive() {
+                quotient.value = zero;
+            }
+        }
+        quotient
     }
 }
 
@@ -89,24 +118,24 @@ enum Width {
 #[derive(Clone, Copy)]
 pub(crate) struct Precision {
     width: Width,
-    cutoff: DivideCutoff,
+    division: Division,
 }
 
 impl Precision {
     pub(crate) const DOUBLE: Self = Self {
         width: Width::Double,
-        cutoff: DivideCutoff::Legacy,
+        division: Division::LEGACY,
     };
 
     fn from_stage(stage: u8) -> Result<Self, Error> {
-        let (width, cutoff) = DivideCutoff::decode(stage)?;
+        let (width, division) = Division::decode(stage);
         let width = match width {
             2 => Width::Half,
             4 => Width::Single,
             8 => Width::Double,
             _ => return Err(Error::InvalidFloatWidth(stage)),
         };
-        Ok(Self { width, cutoff })
+        Ok(Self { width, division })
     }
 
     #[cfg(feature = "extended")]
@@ -179,7 +208,7 @@ impl Stage<f64> for Precision {
     fn div(self, left: Cell<f64>, right: Cell<f64>) -> Cell<f64> {
         let mut quotient = self.quotient(left, right);
         if !quotient.masked {
-            quotient.masked = match self.cutoff {
+            quotient.masked = match self.division.cutoff {
                 DivideCutoff::Scalar => false,
                 _ if !quotient.value.is_finite() => true,
                 DivideCutoff::RoundedToZero => false,
@@ -191,7 +220,7 @@ impl Stage<f64> for Precision {
                 }
             };
         }
-        quotient
+        self.division.finish(quotient, left.value)
     }
 
     fn pow(self, base: Cell<f64>, exponent: f64) -> Cell<f64> {
@@ -247,5 +276,43 @@ impl Stage<f64> for Precision {
             |x| x * (180.0 / std::f32::consts::PI),
             f64::to_degrees,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check_zero_signs<T: ModelValue>(width: u8) {
+        for flag in 0..=7 {
+            let [stage] = T::Stage::widths([width | (flag << 5)]).unwrap();
+            for (numerator, denominator, negative) in [
+                (0.0, -2.0, flag < 5),
+                (-0.0, 2.0, true),
+                (-0.0, -2.0, false),
+                (1.0, f64::NEG_INFINITY, flag < 5),
+                (-1.0, f64::INFINITY, true),
+            ] {
+                let result = stage.div(constant(numerator), constant(denominator));
+                assert!(!result.masked);
+                assert_eq!(result.value.to_f64(), 0.0);
+                assert_eq!(result.value.to_f64().is_sign_negative(), negative);
+            }
+        }
+    }
+
+    #[test]
+    fn array_division_restores_the_numerators_zero_sign() {
+        for width in [2, 4, 8] {
+            check_zero_signs::<f64>(width);
+        }
+    }
+
+    #[cfg(feature = "extended")]
+    #[test]
+    fn extended_array_division_restores_the_numerators_zero_sign() {
+        for width in [4, crate::extended::format().0 as u8] {
+            check_zero_signs::<crate::extended::LongDouble>(width);
+        }
     }
 }

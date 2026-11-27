@@ -101,23 +101,24 @@ To perform calculations across blocks of data using multiple processors:
 import numpy as np
 from flame_components import flame_component_array_multiprocessing
 
-wind_speed = np.array([10.0, 15.0, 20.0, 25.0, 30.0, 35.0])
-canopy_cover = np.array([40, 50, 60, 40, 50, 60])
-canopy_ht = np.array([8.0, 10.0, 12.0, 8.0, 10.0, 12.0])
-canopy_baseht = np.array([2.0, 2.0, 3.0, 2.0, 2.0, 3.0])
+if __name__ == '__main__':
+    wind_speed = np.array([10.0, 15.0, 20.0, 25.0, 30.0, 35.0])
+    canopy_cover = np.array([40, 50, 60, 40, 50, 60])
+    canopy_ht = np.array([8.0, 10.0, 12.0, 8.0, 10.0, 12.0])
+    canopy_baseht = np.array([2.0, 2.0, 3.0, 2.0, 2.0, 3.0])
 
-# Returns a list of per-block result arrays, one per worker, in block order --
-# concatenate them yourself if you need a single array back.
-blocks = flame_component_array_multiprocessing(
-    flame_function='midflame_ws',
-    num_processors=2,
-    wind_speed=wind_speed,
-    canopy_cover=canopy_cover,
-    canopy_ht=canopy_ht,
-    canopy_baseht=canopy_baseht,
-    units='SI'
-)
-mid_flame_ws = np.concatenate(blocks)
+    # Six rows form three blocks of two rows, processed by up to two workers.
+    blocks = flame_component_array_multiprocessing(
+        flame_function='midflame_ws',
+        num_processors=2,
+        block_size=2,
+        wind_speed=wind_speed,
+        canopy_cover=canopy_cover,
+        canopy_ht=canopy_ht,
+        canopy_baseht=canopy_baseht,
+        units='SI'
+    )
+    mid_flame_ws = np.concatenate(blocks)
 ```
 
 `kwargs` passed to `flame_component_array_multiprocessing` must match the parameter names
@@ -127,11 +128,11 @@ and each target function's required parameters.
 
 ## API Reference
 
-All functions accept `int`/`float` scalars or `numpy.ndarray` (NaN cells are masked and
-propagate as NaN in the output). Passing at least one array returns an array; all-scalar
-input returns a Python `float`. Every function raises `TypeError` for a wrong input type
-and `ValueError` for an invalid string option (e.g. an unknown `model` or `units`) or a
-missing model-specific required parameter.
+The calculation functions accept real scalars or real numeric NumPy arrays. Input NaNs
+and masked values propagate as NaN in the output. Passing at least one array returns
+an array. All-scalar inputs produce a NumPy scalar. Invalid types raise `TypeError`.
+Invalid options such as an unknown model and missing model-specific parameters raise
+`ValueError`.
 
 Every calculation and the multiprocessing helper accepts a keyword-only
 `backend` argument. The default `backend="auto"` selects Rust when the compiled
@@ -155,8 +156,9 @@ Mid-flame wind speed (m/s) under a canopy — Albini & Baughman (1979).
 #### `get_flame_length(model, fire_intensity, flame_depth=None, params_only=False, *, backend="auto")`
 Flame length (m) from head fire intensity (kW/m), or the raw model coefficients if
 `params_only=True`. `model` is one of 29 published models (see `model_dict` in
-`src/flame_components/core.py` for the full list and per-model citation); `flame_depth`
-is required only for `model='Finney_HEAD'`.
+`src/flame_components/_equations.py` for the full list and per-model citation); `flame_depth`
+is required only for `model='Finney_HEAD'`. The legacy name `'Barbon_iNOWIND'` selects
+the same model as `'Barbon_NOWIND'`.
 
 #### `get_flame_height(model, flame_length, fire_type=None, fire_intensity=None, midflame_ws=None, flame_tilt=None, slope_angle=None, slope_units=None, *, backend="auto")`
 Flame height (m). `model='Nelson'` requires `fire_type` (`1`/`'surface'`, `2`/`'passive
@@ -175,16 +177,19 @@ Flame residence time — Nelson & Adkins (1988). `ros` must always be in m/min; 
 (`'sec'` or `'min'`) controls the output unit only, not the expected input unit.
 
 #### `get_flame_depth(ros, res_time, *, backend="auto")`
-Flame depth (m) — Fons et al. (1963). `ros` in m/min, `res_time` in minutes.
+Flame depth (m) — Fons et al. (1963). `ros` in m/min, `res_time` in minutes. The
+multiplication follows NumPy dtype rules. Fixed-width integer products can wrap before
+negative results are clamped to zero. Use a dtype wide enough for the expected product.
 
 #### `flame_component_array_multiprocessing(flame_function, num_processors=2, block_size=None, *, backend="auto", **kwargs)`
 Splits array inputs into blocks and runs one of the six functions above across multiple
 processes. `flame_function` is one of `'midflame_ws'`, `'flame_length'`, `'flame_height'`,
 `'flame_tilt'`, `'flame_residence'`, `'flame_depth'`. `kwargs` must match the target
 function's parameter names, with at least one `numpy.ndarray` value (all arrays must share
-the same shape). `num_processors < 2` is coerced to `2` with a `UserWarning`. Returns a
-**list of per-block result arrays, not a single concatenated array** — call
-`numpy.concatenate()` on the result yourself if you need one.
+the same shape and have at least one row). `num_processors < 2` is coerced to `2` with a
+`UserWarning`. The dispatcher returns one result per block in input order, including any
+final partial block. Use `numpy.concatenate()` to join numeric result arrays.
+`params_only=True` for flame length returns a coefficient tuple for each block.
 
 See `docs/CODEBASE.md` for internal architecture and implementation-level gotchas, and
 `docs/TEST_SUITE_DESCRIPTION.md` for the full test-suite catalog.

@@ -259,12 +259,7 @@ fn scalar_commands_match_the_shared_reference_fixtures() {
         } else if case["clamped_mask"][index] == true {
             assert_eq!(actual, Value::Null, "{id}");
         } else {
-            // The standalone clamp retains these kernel payloads. The Python facade maps them to zero.
-            let source = match id {
-                "depth_signed_zero" | "depth_infinity_times_zero" => "kernel_result",
-                _ => "output",
-            };
-            let expected = fixture_scalar(&case[source]["data"][index]).unwrap();
+            let expected = fixture_scalar(&case["output"]["data"][index]).unwrap();
             if expected.is_f64() {
                 let tolerance = case["rtol"].as_f64().unwrap_or(0.0);
                 let expected = expected.as_f64().unwrap();

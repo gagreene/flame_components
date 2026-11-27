@@ -36,8 +36,9 @@ adjacent-float cases exercise distinct paths even when a numerical tolerance
 could hide small output differences.
 
 The checked-in data records the Windows NumPy 2.5.0 run. The Python tests account
-for NumPy's platform default integer and the different clamp dtypes observed
-with NumPy 1.23.2 while keeping the stored reference intact. To reproduce the
+for NumPy's platform default integer and arithmetic promotion differences
+while keeping the stored reference intact. The clamp retains the result dtype,
+unmasked NaNs, and signed zero. To reproduce the
 capture with the recorded runtime, write it to a separate directory and compare
 the result with the checked-in data.
 

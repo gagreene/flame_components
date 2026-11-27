@@ -56,7 +56,7 @@ fn read_cells(buffers: &FlatBuffers<'_>) -> PyResult<Cells> {
         })
         .collect();
     ArrayD::from_shape_vec(IxDyn(&buffers.2), cells)
-        .map_err(|error| PyValueError::new_err(error.to_string()))
+        .map_err(|error| PyValueError::new_err(format!("invalid extended logical shape: {error}")))
 }
 
 fn required_cells(input: Option<FlatBuffers<'_>>, name: &str) -> PyResult<Cells> {
