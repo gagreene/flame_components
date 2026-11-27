@@ -134,10 +134,11 @@ and `ValueError` for an invalid string option (e.g. an unknown `model` or `units
 missing model-specific required parameter.
 
 Every calculation and the multiprocessing helper accepts a keyword-only
-`backend` argument. The default `"auto"` and explicit `"python"` both use NumPy
-in this prerelease. Use `backend="rust"` to run the equations with the compiled
-extension. Rust supports extended NumPy `longdouble` inputs when the
-installed extension and NumPy use the same native format.
+`backend` argument. The default `backend="auto"` selects Rust when the compiled
+extension is installed and uses NumPy when it is absent. An error loading an
+installed extension propagates to the caller. Use `backend="python"` or
+`backend="rust"` to select an engine explicitly. Rust supports extended NumPy
+`longdouble` inputs when the extension and NumPy use the same native format.
 
 The NumPy backend suppresses incidental arithmetic warnings. Explicit NumPy
 error modes such as `over="raise"` still apply. The package reports

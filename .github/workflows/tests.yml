@@ -39,5 +39,7 @@ jobs:
         run: |
           uv venv --python python "$RUNNER_TEMP/source-test"
           uv pip install --python "$RUNNER_TEMP/source-test" 'numpy>=1.23.2'
-          PYTHONPATH="$GITHUB_WORKSPACE/src" "$RUNNER_TEMP/source-test/bin/python" \
-            scripts/smoke_test.py --backend python
+          export PYTHONPATH="$GITHUB_WORKSPACE/src"
+          python="$RUNNER_TEMP/source-test/bin/python"
+          "$python" scripts/smoke_test.py --backend auto
+          "$python" -c "from flame_components._backend import resolve_backend; assert resolve_backend('auto') == 'python'"

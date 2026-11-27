@@ -14,7 +14,7 @@ def calculation_backend(pytestconfig):
 
 @pytest.fixture(autouse=True)
 def route_default_calculations_to_test_backend(calculation_backend, monkeypatch, request):
-    if calculation_backend != "rust" or request.node.path.name == "test_backend.py":
+    if request.node.path.name == "test_backend.py":
         return
 
     from flame_components import _backend

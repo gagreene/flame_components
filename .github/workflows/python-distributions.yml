@@ -73,7 +73,8 @@ jobs:
           if [[ "${{ matrix.numpy }}" == "numpy==1.23.2" ]]; then
             "$python" -I -c "import numpy; assert numpy.__version__ == '1.23.2', numpy.__version__"
           fi
-          "$python" -I "$GITHUB_WORKSPACE/scripts/smoke_test.py" --backend rust \
+          "$python" -I -c "from flame_components._backend import resolve_backend; assert resolve_backend('auto') == 'rust'"
+          "$python" -I "$GITHUB_WORKSPACE/scripts/smoke_test.py" --backend auto \
             --cargo-manifest "$GITHUB_WORKSPACE/rust/Cargo.toml" \
             --release-tag "$RELEASE_TAG" --release-prerelease "$RELEASE_PRERELEASE"
           "$python" -I -m pytest -c "$GITHUB_WORKSPACE/pyproject.toml" -o pythonpath= \
@@ -114,7 +115,8 @@ jobs:
         run: |
           uv venv --python python sdist-test
           uv pip install --no-cache --python sdist-test "$GITHUB_WORKSPACE"/dist/*.tar.gz packaging
-          ./sdist-test/bin/python -I "$GITHUB_WORKSPACE/scripts/smoke_test.py" --backend rust \
+          ./sdist-test/bin/python -I -c "from flame_components._backend import resolve_backend; assert resolve_backend('auto') == 'rust'"
+          ./sdist-test/bin/python -I "$GITHUB_WORKSPACE/scripts/smoke_test.py" --backend auto \
             --cargo-manifest "$GITHUB_WORKSPACE/rust/Cargo.toml" \
             --release-tag "$RELEASE_TAG" --release-prerelease "$RELEASE_PRERELEASE"
 

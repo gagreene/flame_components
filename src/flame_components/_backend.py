@@ -26,4 +26,12 @@ def resolve_backend(backend: str) -> Literal["python", "rust"]:
     if backend == "rust":
         load_native()
         return "rust"
+    if backend == "auto":
+        try:
+            import_module(_NATIVE_MODULE)
+        except ModuleNotFoundError as error:
+            if error.name != _NATIVE_MODULE:
+                raise
+            return "python"
+        return "rust"
     return "python"

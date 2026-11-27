@@ -15,14 +15,13 @@ from flame_components import (
 )
 
 
-@pytest.mark.parametrize("backend", ["auto", "python"])
-def test_python_selection_leaves_native_unimported(monkeypatch, backend):
+def test_python_selection_leaves_native_unimported(monkeypatch):
     def unexpected_import(name):
         pytest.fail(f"Unexpected native import: {name}")
 
     monkeypatch.setattr(_backend, "import_module", unexpected_import)
-    assert _backend.resolve_backend(backend) == "python"
-    assert core.get_flame_depth(3, 2, backend=backend) == 6
+    assert _backend.resolve_backend("python") == "python"
+    assert core.get_flame_depth(3, 2, backend="python") == 6
 
 
 @pytest.mark.parametrize("backend", ["Rust", "", None, []])
@@ -31,12 +30,20 @@ def test_invalid_backend_raises_value_error(backend):
         _backend.resolve_backend(backend)
 
 
-def test_explicit_rust_resolves_when_native_is_present(monkeypatch):
+@pytest.mark.parametrize("backend", ["auto", "rust"])
+def test_native_resolves_when_present(monkeypatch, backend):
     extension = ModuleType("flame_components._native")
     monkeypatch.setitem(sys.modules, extension.__name__, extension)
 
-    assert _backend.resolve_backend("rust") == "rust"
+    assert _backend.resolve_backend(backend) == "rust"
     assert _backend.load_native() is extension
+
+
+def test_auto_uses_python_when_extension_is_absent(monkeypatch):
+    monkeypatch.setitem(sys.modules, "flame_components._native", None)
+
+    assert _backend.resolve_backend("auto") == "python"
+    assert core.get_flame_depth(3, 2) == 6
 
 
 def test_explicit_rust_gives_install_guidance_when_native_is_absent(monkeypatch):
@@ -57,13 +64,14 @@ def test_explicit_rust_gives_install_guidance_when_native_is_absent(monkeypatch)
         RuntimeError("native initialization failed"),
     ],
 )
-def test_explicit_rust_propagates_native_import_failures(monkeypatch, error):
+@pytest.mark.parametrize("backend", ["auto", "rust"])
+def test_native_selection_propagates_import_failures(monkeypatch, error, backend):
     def broken_import(name):
         raise error
 
     monkeypatch.setattr(_backend, "import_module", broken_import)
     with pytest.raises(type(error)) as caught:
-        _backend.resolve_backend("rust")
+        _backend.resolve_backend(backend)
 
     assert caught.value is error
 
@@ -100,7 +108,8 @@ def test_public_call_validates_backend_before_equation_input():
         core.get_flame_depth([], 2, backend="wrong")
 
 
-def test_explicit_rust_dispatches_normalized_data_masks_and_raw_results(monkeypatch):
+@pytest.mark.parametrize("backend", ["auto", "rust"])
+def test_rust_dispatches_normalized_data_masks_and_raw_results(monkeypatch, backend):
     calls = []
 
     def flame_depth(ros, res_time):
@@ -115,7 +124,7 @@ def test_explicit_rust_dispatches_normalized_data_masks_and_raw_results(monkeypa
     result = core.get_flame_depth(
         np.ma.array([2, 8], dtype=np.uint8, mask=[False, True]),
         np.array([2, 2], dtype=np.uint8),
-        backend="rust",
+        backend=backend,
     )
     assert len(calls) == 1
     assert calls[0][0].dtype == np.uint8
