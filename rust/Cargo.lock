@@ -40,7 +40,7 @@ checksum = "3e44f110d1777dc6559a51e7d45083945ded4f1bf3305494350f693b6d20b9c8"
 name = "flame-components"
 version = "0.2.0-rc.1"
 dependencies = [
- "flame-components-wide",
+ "cc",
  "half",
  "ndarray",
  "serde_json",
@@ -63,13 +63,6 @@ dependencies = [
  "ndarray",
  "numpy",
  "pyo3",
-]
-
-[[package]]
-name = "flame-components-wide"
-version = "0.1.0-rc.1"
-dependencies = [
- "cc",
 ]
 
 [[package]]

@@ -40,7 +40,7 @@ jobs:
         run: cargo test --locked -p flame-components -p flame-components-cli
 
       - name: Test optional long double arithmetic and kernels
-        run: cargo test --locked -p flame-components-wide -p flame-components --features extended
+        run: cargo test --locked -p flame-components --features extended
 
       - name: Build standalone CLI
         run: cargo build --locked --release -p flame-components-cli
@@ -75,7 +75,7 @@ jobs:
           if-no-files-found: error
 
   cargo-package:
-    name: Verify Cargo source archives
+    name: Verify standalone Cargo archive
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     defaults:
@@ -86,7 +86,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.78.0
 
-      - name: Package and verify the library and its long-double helper
-        run: cargo +stable package --locked -p flame-components-wide -p flame-components --features flame-components/extended
+      - name: Package the standalone library with extended precision
+        run: cargo package --locked -p flame-components --features extended

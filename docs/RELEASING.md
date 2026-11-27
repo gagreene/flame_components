@@ -60,27 +60,19 @@ be automated from a local session.
 Wheels include the Rust extension. Installing the source distribution requires a
 Rust toolchain and a C compiler for the extended-precision arithmetic shim. The standalone CLI runs independently of the Python package.
 
-## Rust source archives and registry order
+## Rust source archive
 
 The standalone library can be used as a Cargo path dependency from the checkout.
-From `rust/`, use a current stable Cargo to package both crates and verify the
-library archive against the packaged long-double helper.
+From `rust/`, verify the single library archive with its optional extended
+arithmetic enabled.
 
 ```bash
-cargo +stable package --locked -p flame-components-wide -p flame-components --features flame-components/extended
+cargo package --locked -p flame-components --features extended
 ```
 
-GitHub's standalone Rust workflow verifies the archives. Registry publication
-requires a separate release step. For a crates.io release, publish
-`flame-components-wide` first and wait for the exact required version to appear
-in the registry index before packaging or publishing `flame-components` alone.
-Cargo resolves the optional helper dependency during packaging even when the
-`extended` feature is disabled. Until the required helper version is available
-on crates.io, package the two crates together from the checkout.
-
-The helper tracks its own ABI version. Change that version separately from the
-workspace release version and update the library's exact dependency requirement
-when releasing a new helper version.
+GitHub's standalone Rust workflow verifies this archive. The source for the
+optional `extended` feature ships inside `flame-components`. A crates.io release
+publishes that library crate.
 
 ## What goes in release notes
 

@@ -1,4 +1,6 @@
-use flame_components_wide::{format, LongDouble, BYTE_CAPACITY};
+#![cfg(feature = "extended")]
+
+use flame_components::extended::{format, LongDouble, BYTE_CAPACITY};
 use std::cmp::Ordering;
 
 #[test]

@@ -45,18 +45,16 @@ Python-reference comparisons with Cargo:
 cargo test --locked --manifest-path rust/Cargo.toml
 ```
 
-To build and verify the source archives, use a current stable Cargo from the
-repository's `rust/` directory.
+To build and verify the single library archive from the repository's `rust/`
+directory, run:
 
 ```text
-cargo +stable package --locked -p flame-components-wide -p flame-components --features flame-components/extended
+cargo package --locked -p flame-components --features extended
 ```
 
-The library archive contains the unit tests and the depth/residence integration
-tests. The repository checkout also supplies the shared frozen fixtures for
-cross-language comparisons. Packaging the library alone for crates.io requires
-the exact helper version declared in its manifest to be available in the
-registry, even for a default-feature build.
+The library archive includes the extended arithmetic source and the Rust unit
+and integration tests. The repository checkout also supplies the shared frozen
+fixtures for cross-language comparisons.
 
 The optional `extended` feature adds the host's C `long double` representation
 and arithmetic to the Rust kernels. Building with this feature requires a C

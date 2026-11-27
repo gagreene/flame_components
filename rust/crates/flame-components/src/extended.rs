@@ -11,7 +11,7 @@
 use ndarray::{ArrayD, ArrayViewD};
 
 pub use crate::depth::flame_depth_array;
-pub use flame_components_wide::{format, LongDouble, BYTE_CAPACITY};
+pub use crate::wide::{format, LongDouble, BYTE_CAPACITY};
 
 use crate::depth::DepthValue;
 use crate::length::LengthModel;

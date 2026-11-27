@@ -12,10 +12,12 @@ readme = "README.md"
 exclude = ["tests/reference.rs"]
 
 [features]
-extended = ["dep:flame-components-wide"]
+extended = ["dep:cc"]
+
+[build-dependencies]
+cc = { version = "=1.2.57", optional = true }
 
 [dependencies]
-flame-components-wide = { version = "=0.1.0-rc.1", path = "../flame-components-wide", optional = true }
 half = "=2.4.1"
 ndarray.workspace = true
 

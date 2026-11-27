@@ -4,11 +4,16 @@
 //! views in the units documented by each module. They return equation results;
 //! use [`Cell::nonnegative`] to apply the public Python API's final clamp.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
+#![cfg_attr(not(feature = "extended"), forbid(unsafe_code))]
 
 mod array;
 mod cell;
 mod precision;
+// The optional C arithmetic shim owns the native byte-level FFI boundary.
+#[cfg(feature = "extended")]
+#[allow(unsafe_code)]
+mod wide;
 
 pub mod depth;
 #[cfg(feature = "extended")]
