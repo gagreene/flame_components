@@ -43,6 +43,24 @@ uv run pytest tests/ -v   # run the test suite
 uv build             # build the wheel and sdist into dist/
 ```
 
+## Rust library
+
+The [standalone Rust crate](rust/crates/flame-components/README.md) provides
+scalar and array APIs for all six calculations. Rust 1.78 or later can build
+and test it without a Python environment.
+
+```text
+cargo test --locked --manifest-path rust/Cargo.toml
+```
+
+## Standalone command line
+
+Build the executable with `cargo build --release --locked --manifest-path
+rust/Cargo.toml -p flame-components-cli`. For example,
+`flame-components flame-depth --ros 3 --res-time 2` prints `6`.
+The CLI accepts scalar flags and scalar JSON from a file or standard input.
+[CLI reference](rust/crates/flame-components-cli/README.md)
+
 ## Usage
 
 ### Key Functions
@@ -116,41 +134,54 @@ an array. All-scalar inputs produce a NumPy scalar. Invalid types raise `TypeErr
 Invalid options such as an unknown model and missing model-specific parameters raise
 `ValueError`.
 
-#### `get_mid_flame_ws(wind_speed, canopy_cover, canopy_ht, canopy_baseht, units='SI')`
+Every calculation and the multiprocessing helper accepts a keyword-only
+`backend` argument. The default `backend="auto"` selects Rust when the compiled
+extension is installed and uses NumPy when it is absent. An error loading an
+installed extension propagates to the caller. Use `backend="python"` or
+`backend="rust"` to select an engine explicitly. Rust supports extended NumPy
+`longdouble` inputs when the extension and NumPy use the same native format.
+
+Automatic selection also uses NumPy when `numpy.seterr` or `numpy.errstate`
+requests an exception, callback, log, or printed error. The NumPy backend
+suppresses incidental arithmetic warnings. The package reports
+`UserWarning` for conditions such as zero canopy height and a processor count
+below two.
+
+#### `get_mid_flame_ws(wind_speed, canopy_cover, canopy_ht, canopy_baseht, units='SI', *, backend="auto")`
 Mid-flame wind speed (m/s) under a canopy — Albini & Baughman (1979).
 - `units`: `'SI'` (10-m wind in km/h, heights in m) or `'IMP'` (20-ft wind in mi/h, heights in ft).
 - `canopy_ht == 0` is substituted with a 0.5 m equivalent and raises `UserWarning`.
 - Output is always m/s regardless of input units.
 
-#### `get_flame_length(model, fire_intensity, flame_depth=None, params_only=False)`
+#### `get_flame_length(model, fire_intensity, flame_depth=None, params_only=False, *, backend="auto")`
 Flame length (m) from head fire intensity (kW/m), or the raw model coefficients if
 `params_only=True`. `model` is one of 29 published models (see `model_dict` in
-`src/flame_components/core.py` for the full list and per-model citation); `flame_depth`
+`src/flame_components/_equations.py` for the full list and per-model citation); `flame_depth`
 is required only for `model='Finney_HEAD'`. The legacy name `'Barbon_iNOWIND'` selects
 the same model as `'Barbon_NOWIND'`.
 
-#### `get_flame_height(model, flame_length, fire_type=None, fire_intensity=None, midflame_ws=None, flame_tilt=None, slope_angle=None, slope_units=None)`
+#### `get_flame_height(model, flame_length, fire_type=None, fire_intensity=None, midflame_ws=None, flame_tilt=None, slope_angle=None, slope_units=None, *, backend="auto")`
 Flame height (m). `model='Nelson'` requires `fire_type` (`1`/`'surface'`, `2`/`'passive
 crown'`, `3`/`'active crown'`), `fire_intensity`, and `midflame_ws`. `model='Finney'`
 requires `flame_tilt`, `slope_angle`, and `slope_units` (`'degrees'` or `'percent'`).
 
-#### `get_flame_tilt(model, flame_length=None, flame_height=None, slope_angle=None, slope_units=None, wind_speed=None, wind_speed_units=None, canopy_ht=None)`
+#### `get_flame_tilt(model, flame_length=None, flame_height=None, slope_angle=None, slope_units=None, wind_speed=None, wind_speed_units=None, canopy_ht=None, *, backend="auto")`
 Flame tilt angle from vertical (degrees). `model='Standard'` (flat ground) requires
 `flame_length`/`flame_height`. `model='Finney'` (sloped ground) additionally requires
 `slope_angle`/`slope_units`. `model='Butler'` (crown fires only) requires `wind_speed`,
 `wind_speed_units` (`'kph'`/`'mps'`/`'mph'`), and `canopy_ht` (must be `> 0`, or raises
 `ValueError`).
 
-#### `get_flame_residence_time(ros, fuel_consumption, midflame_ws, units)`
+#### `get_flame_residence_time(ros, fuel_consumption, midflame_ws, units, *, backend="auto")`
 Flame residence time — Nelson & Adkins (1988). `ros` must always be in m/min; `units`
 (`'sec'` or `'min'`) controls the output unit only, not the expected input unit.
 
-#### `get_flame_depth(ros, res_time)`
+#### `get_flame_depth(ros, res_time, *, backend="auto")`
 Flame depth (m) — Fons et al. (1963). `ros` in m/min, `res_time` in minutes. The
 multiplication follows NumPy dtype rules. Fixed-width integer products can wrap before
 negative results are clamped to zero. Use a dtype wide enough for the expected product.
 
-#### `flame_component_array_multiprocessing(flame_function, num_processors=2, block_size=None, **kwargs)`
+#### `flame_component_array_multiprocessing(flame_function, num_processors=2, block_size=None, *, backend="auto", **kwargs)`
 Splits array inputs into blocks and runs one of the six functions above across multiple
 processes. `flame_function` is one of `'midflame_ws'`, `'flame_length'`, `'flame_height'`,
 `'flame_tilt'`, `'flame_residence'`, `'flame_depth'`. `kwargs` must match the target

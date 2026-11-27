@@ -1,77 +1,73 @@
 name: Publish
 
 # Runs only for a deliberate, human-published GitHub Release -- never on a bare tag push.
-# Mark the Release as "pre-release" (e.g. a v0.1.1rc1 tag) to publish to TestPyPI, or as a
-# full release (e.g. v0.1.1) to publish to PyPI. See docs/RELEASING.md.
+# Mark the Release as "pre-release" (e.g. a v0.2.0rc1 tag) to publish to TestPyPI, or as a
+# full release (e.g. v0.2.0) to publish to PyPI. See docs/RELEASING.md.
 on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
+  python-distributions:
+    uses: ./.github/workflows/python-distributions.yml
+    with:
+      release-tag: ${{ github.event.release.tag_name }}
+      release-prerelease: ${{ github.event.release.prerelease }}
+
+  standalone-rust:
+    uses: ./.github/workflows/standalone-rust.yml
+    with:
+      upload-cli: true
+
   build:
-    name: Build, validate, and smoke-test distributions
-    runs-on: ubuntu-latest
+    name: Validate and attach release assets
+    needs: [python-distributions, standalone-rust]
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
-      contents: write  # needed to attach dist/ files to the GitHub Release
+      contents: write  # needed to attach files to the GitHub Release
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Download wheels
+        uses: actions/download-artifact@v7
         with:
-          fetch-depth: 0  # full history + tags, required for hatch-vcs to derive the version
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist/
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.0.1
+      - name: Download source distribution
+        uses: actions/download-artifact@v7
         with:
-          enable-cache: true
+          name: sdist
+          path: dist/
 
-      - name: Install Python
-        run: uv python install 3.12
+      - name: Download standalone executables
+        uses: actions/download-artifact@v7
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: cli/
 
-      - name: Install project (extras + dev group)
-        run: uv sync --all-extras --dev
+      - name: Validate Python distributions
+        run: uvx --python 3.12 twine check dist/*
 
-      - name: Run full test suite
-        run: uv run pytest tests/ -v --tb=long
-
-      - name: Build distributions
-        run: uv build --no-sources
-
-      - name: Verify the built version matches the release tag
-        # hatch-vcs derives the version from git tags -- assert it actually did, rather
-        # than trusting it silently. Guards against any stale-build/cache scenario
-        # producing a dev-version wheel that would otherwise get published as if it were
-        # the tagged release.
-        run: |
-          expected="${GITHUB_REF_NAME#v}"
-          actual="$(uv run python -c 'import flame_components as fc; print(fc.__version__)')"
-          echo "expected (from tag): $expected"
-          echo "actual (from built package): $actual"
-          if [ "$expected" != "$actual" ]; then
-            echo "::error::Built version '$actual' does not match release tag '$GITHUB_REF_NAME' (expected '$expected')"
-            exit 1
-          fi
-
-      - name: Validate distributions
-        run: uvx twine check dist/*
-
-      - name: Install the built wheel into a fresh environment and smoke-test it
-        run: |
-          uv venv /tmp/smoke-wheel
-          uv pip install --python /tmp/smoke-wheel/bin/python dist/*.whl
-          /tmp/smoke-wheel/bin/python scripts/smoke_test.py
-
-      - name: Upload distributions as a workflow artifact
+      - name: Upload Python distributions as a workflow artifact
         uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
           if-no-files-found: error
 
-      - name: Attach distributions to the GitHub Release
+      - name: Attach Python distributions and CLI binaries to the GitHub Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/* cli/* --clobber
 
   publish-testpypi:
     name: Publish to TestPyPI
