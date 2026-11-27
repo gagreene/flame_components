@@ -9,6 +9,8 @@ import pytest
 from flame_components import (
     get_flame_depth,
     get_flame_height,
+    get_flame_length,
+    get_flame_residence_time,
     get_flame_tilt,
     get_mid_flame_ws,
 )
@@ -127,22 +129,93 @@ def test_standard_tilt_respects_magnitude_dependent_zero_dimensional_dtype(nativ
     np.testing.assert_allclose(actual, expected, rtol=2e-14)
 
 
-@pytest.mark.skipif(np.dtype(np.longdouble).itemsize <= 8, reason="binary64 longdouble")
-def test_extended_precision_requires_explicit_python_backend(native):
-    values = np.array([2.0], dtype=np.longdouble)
-    with pytest.raises(TypeError, match="extended-precision"):
-        get_flame_depth(values, values, backend="rust")
-    np.testing.assert_array_equal(get_flame_depth(values, values, backend="python"), [4])
+requires_wide = pytest.mark.skipif(
+    np.dtype(np.longdouble).itemsize <= 8, reason="binary64 longdouble"
+)
 
 
-def test_native_boolean_buffers_accept_noncanonical_numpy_true(native):
-    data = np.array([0, 2, 3], dtype=np.uint8).view(np.bool_)
-    mask = np.array([0, 0, 2], dtype=np.uint8).view(np.bool_)
-    result, result_mask, _ = native.flame_depth(
-        (data, mask), (np.ones((), dtype=np.bool_), np.zeros((), dtype=np.bool_))
-    )
-    np.testing.assert_array_equal(result[:2], [False, True])
-    np.testing.assert_array_equal(result_mask, [False, False, True])
+@requires_wide
+def test_extended_depth_preserves_bits_range_masks_and_strides(native):
+    one = np.longdouble(1)
+    adjacent = np.nextafter(one, np.longdouble(2))
+    huge = np.ldexp(one, 1100)
+    data = np.array([[adjacent, huge], [one, huge]], dtype=np.longdouble)
+    values = np.ma.array(data, mask=[[False, False], [True, False]])[:, ::-1]
+    expected = get_flame_depth(values, np.array(one), backend="python")
+    actual = get_flame_depth(values, np.array(one), backend="rust")
+
+    assert expected[0, 1] != one
+    assert np.isfinite(expected[0, 0])
+    assert actual.dtype == expected.dtype
+    np.testing.assert_array_equal(actual, expected)
+
+
+@requires_wide
+def test_extended_zero_dimensional_empty_and_swapped_buffers(native):
+    one = np.longdouble(1)
+    adjacent = np.nextafter(one, np.longdouble(2))
+    for values in (np.array(adjacent), np.empty((2, 0), dtype=np.longdouble)):
+        swapped = values.astype(values.dtype.newbyteorder("S"))
+        expected = get_flame_depth(swapped, one, backend="python")
+        actual = get_flame_depth(swapped, one, backend="rust")
+        assert actual.dtype == expected.dtype
+        assert actual.shape == expected.shape
+        np.testing.assert_array_equal(actual, expected)
+
+
+@requires_wide
+def test_extended_standard_tilt_preserves_the_domain_boundary(native):
+    one = np.longdouble(1)
+    lengths = np.array([one, one, one])
+    heights = np.array([np.nextafter(one, np.longdouble(2)), one, np.longdouble("0.5")])
+    expected = get_flame_tilt("Standard", lengths, heights, backend="python")
+    actual = get_flame_tilt("Standard", lengths, heights, backend="rust")
+    assert np.isnan(expected[0])
+    assert expected[1] == 0
+    assert actual.dtype == expected.dtype
+    np.testing.assert_allclose(actual, expected, rtol=32 * np.finfo(np.longdouble).eps, atol=0)
+
+
+@requires_wide
+@pytest.mark.parametrize(
+    ("equation", "args", "kwargs"),
+    [
+        (get_flame_length, ("Byram_HEAD", [100, 600]), {}),
+        (get_flame_length, ("Finney_HEAD", [100, 600], [5, 9]), {}),
+        (get_flame_height, ("Nelson", [6, 8]), {
+            "fire_type": [1, 3], "fire_intensity": [100, 600], "midflame_ws": [0, 3],
+        }),
+        (get_flame_height, ("Finney", [6, 8]), {
+            "flame_tilt": [20, 30], "slope_angle": [0.5, 12], "slope_units": "degrees",
+        }),
+        (get_flame_tilt, ("Finney", [6, 8], [3, 5], [-20, 10], "percent"), {}),
+        (get_flame_tilt, ("Butler",), {
+            "wind_speed": [18, 26], "wind_speed_units": "kph", "canopy_ht": [10, 15],
+        }),
+        (get_mid_flame_ws, ([20, 30], [30, 1900], [10, 8], [1, 0.5]), {}),
+        (get_flame_residence_time, ([3, 6], [0.7, 0.8], [1.1, 4], "min"), {}),
+    ],
+)
+def test_extended_kernels_match_numpy_values_and_dtypes(native, equation, args, kwargs):
+    def convert(value):
+        return np.array(value, dtype=np.longdouble) if isinstance(value, list) else value
+
+    values = tuple(map(convert, args))
+    options = {name: convert(value) for name, value in kwargs.items()}
+    _compare(equation, *values, **options, rtol=64 * np.finfo(np.longdouble).eps)
+
+
+@requires_wide
+def test_extended_wind_keeps_canopy_substitution_diagnostic(native):
+    height = np.array([0.0, 10.0], dtype=np.longdouble)
+    with pytest.warns(UserWarning, match="canopy_ht") as reference:
+        expected = get_mid_flame_ws(20, 50, height, 1, backend="python")
+    with pytest.warns(UserWarning, match="canopy_ht") as measured:
+        actual = get_mid_flame_ws(20, 50, height, 1, backend="rust")
+    assert len(measured) == len(reference) == 1
+    assert str(measured[0].message) == str(reference[0].message)
+    assert actual.dtype == expected.dtype
+    np.testing.assert_allclose(actual, expected, rtol=64 * np.finfo(np.longdouble).eps, atol=0)
 
 
 def test_finney_shape_error_preserves_reference_operand_order(native):

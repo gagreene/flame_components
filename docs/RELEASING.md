@@ -56,8 +56,10 @@ be automated from a local session.
    run `python scripts/smoke_test.py --backend rust` from a checkout. For a TestPyPI
    rehearsal, use the TestPyPI release with NumPy installed from PyPI.
 
+The internal long-double arithmetic crate has a separate ABI version. The public package, library, and CLI share the workspace release version.
+
 Wheels include the Rust extension. Installing the source distribution requires a
-Rust toolchain. The standalone CLI runs independently of the Python package.
+Rust toolchain and a C compiler for the extended-precision arithmetic shim. The standalone CLI runs independently of the Python package.
 
 ## What goes in release notes
 

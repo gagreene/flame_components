@@ -20,10 +20,35 @@ def _return_array(data, mask, dtype):
         return ma.array(data.astype(dtype, copy=False), mask=mask, copy=False)
 
 
+def _is_extended(dtype):
+    return dtype.kind == "f" and dtype.itemsize > 8
+
+
+def _extended_buffers(array, dtype):
+    data = np.require(ma.getdata(array), dtype=dtype, requirements=("A", "C"))
+    # A trailing byte axis works for zero-dimensional and empty arrays as well.
+    packet = data.reshape((*data.shape, 1)).view(np.uint8)
+    return packet, np.require(ma.getmaskarray(array), requirements="A")
+
+
+def _extended(native, equation, args, precision, equality=None):
+    dtype = np.dtype(np.longdouble)
+    info = np.finfo(dtype)
+    expected = (dtype.itemsize, info.nmant + 1, info.minexp, info.maxexp)
+    if native.extended_format() != expected:
+        raise TypeError("The Rust backend does not support this platform's NumPy longdouble format")
+    buffers = tuple(
+        _extended_buffers(arg, dtype) if isinstance(arg, np.ndarray) else arg
+        for arg in args
+    )
+    data, mask, substituted = native.extended(equation, buffers, precision, equality=equality)
+    return data.view(dtype).reshape(mask.shape), mask, substituted
+
+
 def _depth(native, args):
     dtype = np.result_type(*(ma.getdata(arg) for arg in args))
-    if dtype.kind == "f" and dtype.itemsize > 8:
-        raise TypeError("The Rust backend does not support extended-precision flame depth")
+    if _is_extended(dtype):
+        return _extended(native, "flame_depth", args, None), dtype
     # A binary16 product fits exactly in binary32 before the final rounding.
     storage = np.dtype("float32") if dtype == np.dtype("float16") else dtype.newbyteorder("=")
     return native.flame_depth(*(_buffers(arg, storage) for arg in args)), dtype
@@ -65,23 +90,34 @@ def run(equation, *args):
         result, dtype = _depth(native, args)
     else:
         args = _active_inputs(equation, args)
-        for arg in args:
-            if isinstance(arg, np.ndarray) and arg.dtype.kind == "f" and arg.dtype.itemsize > 8:
-                raise TypeError("The Rust backend does not support extended-precision inputs")
         parameters = _equations.LENGTH_MODELS[args[0]] if equation == "flame_length" else None
         precision, dtype = _precision.metadata(equation, args, parameters)
-        storage = np.dtype("float64")
-        if equation == "flame_tilt" and args[0] == "Standard":
-            if dtype == np.dtype("float16"):
-                precision = (2,) * 7
-            else:
-                storage = dtype.newbyteorder("=")
-        inputs = tuple(_buffers(arg, storage) if isinstance(arg, np.ndarray) else arg for arg in args)
-        kernel = getattr(native, equation)
-        options = {} if precision is None else {"precision": precision}
-        if equation == "flame_tilt" and args[0] == "Finney":
-            options["equality"] = _finney_equality(args[1], args[2])
-        result = kernel(*inputs, **options)
+        equality = (
+            _finney_equality(args[1], args[2])
+            if equation == "flame_tilt" and args[0] == "Finney" else None
+        )
+        wide_inputs = any(
+            isinstance(arg, np.ndarray) and _is_extended(arg.dtype) for arg in args
+        )
+        if wide_inputs:
+            if equation == "flame_tilt" and args[0] == "Standard":
+                precision = (dtype.itemsize,) * 7
+            result = _extended(native, equation, args, precision, equality)
+        else:
+            storage = np.dtype("float64")
+            if equation == "flame_tilt" and args[0] == "Standard":
+                if dtype == np.dtype("float16"):
+                    precision = (2,) * 7
+                else:
+                    storage = dtype.newbyteorder("=")
+            inputs = tuple(
+                _buffers(arg, storage) if isinstance(arg, np.ndarray) else arg
+                for arg in args
+            )
+            options = {} if precision is None else {"precision": precision}
+            if equality is not None:
+                options["equality"] = equality
+            result = getattr(native, equation)(*inputs, **options)
 
     data, mask, substituted = result
     return _return_array(data, mask, dtype), substituted

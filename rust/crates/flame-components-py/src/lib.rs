@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod errors;
+mod extended;
 
 use std::mem::{align_of, size_of};
 
@@ -15,7 +16,9 @@ use flame_components::tilt::{self, TiltModel};
 use flame_components::wind::{self, WindUnits};
 use flame_components::{Cell, Error, SlopeUnits, WindSpeedUnits};
 use ndarray::{ArrayD, Zip};
-use numpy::{Element, IntoPyArray, PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
+use numpy::{
+    Element, IntoPyArray, PyArrayDyn, PyArrayMethods, PyReadonlyArrayDyn, PyUntypedArrayMethods,
+};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
@@ -57,6 +60,19 @@ fn read_with_mask<T: Element + Copy, U>(
     if data.shape() != mask.shape() {
         return Err(PyValueError::new_err("data and mask shapes must match"));
     }
+    let data = aligned_readonly(data)?;
+    let mask = aligned_readonly(&mask)?;
+    Ok(Zip::from(data.as_array())
+        .and(mask.as_array())
+        .map_collect(|&value, &masked| Cell {
+            value: convert(value),
+            masked: masked != 0,
+        }))
+}
+
+fn aligned_readonly<'py, T: Element>(
+    data: &Bound<'py, PyArrayDyn<T>>,
+) -> PyResult<PyReadonlyArrayDyn<'py, T>> {
     if data.data().align_offset(align_of::<T>()) != 0
         || data
             .shape()
@@ -66,15 +82,8 @@ fn read_with_mask<T: Element + Copy, U>(
     {
         return Err(PyValueError::new_err("data must be aligned"));
     }
-    let borrow_error = |error: numpy::BorrowError| PyValueError::new_err(error.to_string());
-    let data = data.try_readonly().map_err(borrow_error)?;
-    let mask = mask.try_readonly().map_err(borrow_error)?;
-    Ok(Zip::from(data.as_array())
-        .and(mask.as_array())
-        .map_collect(|&value, &masked| Cell {
-            value: convert(value),
-            masked: masked != 0,
-        }))
+    data.try_readonly()
+        .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
 fn split_cells<'py, T: Element + Copy>(
@@ -101,6 +110,39 @@ fn parse_slope_units(units: Option<&str>) -> PyResult<SlopeUnits> {
         Some("percent") => Ok(SlopeUnits::Percent),
         _ => Err(PyValueError::new_err("invalid slope units")),
     }
+}
+
+fn parse_wind_units(units: &str) -> PyResult<WindUnits> {
+    match units {
+        "SI" => Ok(WindUnits::Si),
+        "IMP" => Ok(WindUnits::Imperial),
+        _ => Err(PyValueError::new_err("invalid wind unit system")),
+    }
+}
+
+fn parse_wind_speed_units(units: Option<&str>) -> PyResult<WindSpeedUnits> {
+    match units {
+        Some("kph") => Ok(WindSpeedUnits::Kph),
+        Some("mps") => Ok(WindSpeedUnits::Mps),
+        Some("mph") => Ok(WindSpeedUnits::Mph),
+        _ => Err(PyValueError::new_err("invalid wind speed units")),
+    }
+}
+
+fn parse_residence_units(units: &str) -> PyResult<ResidenceUnits> {
+    match units {
+        "sec" => Ok(ResidenceUnits::Seconds),
+        "min" => Ok(ResidenceUnits::Minutes),
+        _ => Err(PyValueError::new_err("invalid residence time units")),
+    }
+}
+
+fn wind_error(py: Python<'_>, failure: wind::WindError) -> PyResult<PyErr> {
+    let error = python_error_for(ShapeModel::Wind, failure.error);
+    if failure.substituted_canopy_height {
+        error.value(py).setattr("substituted_canopy_height", true)?;
+    }
+    Ok(error)
 }
 
 fn output<'py, T: Element + Copy>(
@@ -174,11 +216,7 @@ fn mid_flame_ws<'py>(
     units: &str,
     precision: Option<[u8; 18]>,
 ) -> PyResult<Output<'py>> {
-    let units = match units {
-        "SI" => WindUnits::Si,
-        "IMP" => WindUnits::Imperial,
-        _ => return Err(PyValueError::new_err("invalid wind unit system")),
-    };
+    let units = parse_wind_units(units)?;
     let wind_speed = read_cells(&wind_speed)?;
     let canopy_cover = read_cells(&canopy_cover)?;
     let canopy_ht = read_cells(&canopy_ht)?;
@@ -206,13 +244,7 @@ fn mid_flame_ws<'py>(
             result.value,
             result.substituted_canopy_height,
         )),
-        Err(failure) => {
-            let error = python_error_for(ShapeModel::Wind, failure.error);
-            if failure.substituted_canopy_height {
-                error.value(py).setattr("substituted_canopy_height", true)?;
-            }
-            Err(error)
-        }
+        Err(failure) => Err(wind_error(py, failure)?),
     }
 }
 
@@ -390,12 +422,7 @@ fn flame_tilt<'py>(
         "Butler" => {
             let wind_speed = required_cells(wind_speed.as_ref(), "wind_speed")?;
             let canopy_ht = required_cells(canopy_ht.as_ref(), "canopy_ht")?;
-            let wind_speed_units = match wind_speed_units {
-                Some("kph") => WindSpeedUnits::Kph,
-                Some("mps") => WindSpeedUnits::Mps,
-                Some("mph") => WindSpeedUnits::Mph,
-                _ => return Err(PyValueError::new_err("invalid wind speed units")),
-            };
+            let wind_speed_units = parse_wind_speed_units(wind_speed_units)?;
             let result = match precision {
                 Some(widths) => tilt::butler_tilt_array_with_precision(
                     wind_speed.view(),
@@ -424,11 +451,7 @@ fn flame_residence_time<'py>(
     units: &str,
     precision: Option<[u8; 7]>,
 ) -> PyResult<Output<'py>> {
-    let units = match units {
-        "sec" => ResidenceUnits::Seconds,
-        "min" => ResidenceUnits::Minutes,
-        _ => return Err(PyValueError::new_err("invalid residence time units")),
-    };
+    let units = parse_residence_units(units)?;
     let ros = read_cells(&ros)?;
     let fuel_consumption = read_cells(&fuel_consumption)?;
     let midflame_ws = read_cells(&midflame_ws)?;
@@ -452,6 +475,8 @@ fn flame_residence_time<'py>(
 
 #[pymodule(gil_used = true)]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(extended::extended, module)?)?;
+    module.add_function(wrap_pyfunction!(extended::extended_format, module)?)?;
     module.add_function(wrap_pyfunction!(flame_depth, module)?)?;
     module.add_function(wrap_pyfunction!(flame_height, module)?)?;
     module.add_function(wrap_pyfunction!(flame_length, module)?)?;
