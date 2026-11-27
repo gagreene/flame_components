@@ -1,21 +1,20 @@
-# -*- coding: utf-8 -*-
 """
 Created on Wed Oct  11 13:25:52 2023
 
 @author: Gregory A. Greene
 """
 
-import numpy as np
+
 import arcpy
+import numpy as np
 from arcpy.sa import *
-from typing import Union
 
 
-def getDegrees(in_data: Union[float, arcpy.Raster]) -> Union[float, arcpy.Raster]:
+def getDegrees(in_data: float | arcpy.Raster) -> float | arcpy.Raster:
     return in_data * 180 / np.pi
 
 
-def getRadians(in_data: Union[float, arcpy.Raster]) -> Union[float, arcpy.Raster]:
+def getRadians(in_data: float | arcpy.Raster) -> float | arcpy.Raster:
     return in_data * np.pi / 180
 
 
@@ -120,7 +119,7 @@ def getFlameLength(model: str,
     model_params = model_dict.get(model)
 
     if model_params is None:
-        raise Exception('Unable to calculate flame length - Model choice is invalid')
+        raise ValueError('Unable to calculate flame length - Model choice is invalid')
 
     if params_only:
         return model_params
@@ -141,7 +140,7 @@ def getFlameHeight(model: str,
                    midflame_ws: arcpy.Raster = None,        # Only for Nelson model
                    flame_tilt: arcpy.Raster = None,         # Only for Finney model
                    slope_angle: arcpy.Raster = None,        # Only for Finney model
-                   slope_units: str = None                  # Only for Finney model
+                   slope_units: str | None = None                  # Only for Finney model
                    ) -> arcpy.Raster:
     """
     Equations from Nelson and Adkins (1986) or Finney and Martin (1992) - referenced in Cruz and Alexander (2018)
@@ -175,7 +174,7 @@ def getFlameHeight(model: str,
         elif slope_units == 'degrees':
             slope_rad = getRadians(slope_angle)
         else:
-            raise Exception('Unable to calculate flame height - Slope tilt')
+            raise ValueError('Unable to calculate flame height - Slope tilt')
 
         # Convert flame tilt so it is relative to horizontal
         tilt_h = np.pi / 2 - getRadians(flame_tilt)
@@ -185,7 +184,7 @@ def getFlameHeight(model: str,
                    flame_length * Sin(tilt_h),
                    flame_length * Sin(tilt_h - slope_rad) / Sin(getRadians(90) - slope_rad))
     else:
-        raise Exception('Unable to calculate flame height - Model choice is invalid')
+        raise ValueError('Unable to calculate flame height - Model choice is invalid')
 
 
 # FUNCTION TO CALCULATE FLAME TILT
@@ -193,9 +192,9 @@ def getFlameTilt(model: str,
                  flame_length: arcpy.Raster = None,
                  flame_height: arcpy.Raster = None,
                  slope_angle: arcpy.Raster = None,
-                 slope_units: str = None,
+                 slope_units: str | None = None,
                  windspeed: arcpy.Raster = None,
-                 windspeed_units: str = None,
+                 windspeed_units: str | None = None,
                  canopy_ht: arcpy.Raster = None) -> arcpy.Raster:
     """
     Function calculates flame tilt using Finney and Martin (1992) and Butler et al. (2004) equations
@@ -232,7 +231,7 @@ def getFlameTilt(model: str,
         elif slope_units == 'degrees':
             slope_rad = getRadians(slope_angle)
         else:
-            raise Exception('Unable to calculate flame tilt - Invalid slope units provided')
+            raise ValueError('Unable to calculate flame tilt - Invalid slope units provided')
 
         # Calculate Finney and Martin (1992) flame tilt angle
         if flame_height == flame_length:
@@ -247,7 +246,7 @@ def getFlameTilt(model: str,
         # ONLY REQUIRES 10m WIND SPEED AS AN INPUT
         # ONLY USE FOR CROWN FIRES, OTHERWISE TILT WILL BE TOO LOW
         if any(elem is None for elem in [windspeed, windspeed_units, canopy_ht]):
-            raise Exception('Unable to calculate "Butler" flame tilt - '
+            raise ValueError('Unable to calculate "Butler" flame tilt - '
                             'Did not pass at least one of the required input parameters')
 
         # Convert wind speed units if necessary
@@ -266,17 +265,17 @@ def getFlameTilt(model: str,
         # This equation already calculates tilt relative to vertical rather than horizontal
         tilt_v = ATan(SquareRoot((3 * Power(uc, 3)) / (2 * g * 10)))
     else:
-        raise Exception('Unable to calculate flame tilt - Model choice is invalid')
+        raise ValueError('Unable to calculate flame tilt - Model choice is invalid')
 
     # Return flame tilt angle relative to vertical (degrees)
     return Con(tilt_v >= 0, getDegrees(tilt_v), 0)
 
 
 # FUNCTION TO CALCULATE FLAME RESIDENCE TIME
-def getFlameResidenceTime(ros: Union[float, arcpy.Raster],
-                          fuel_consumption: Union[float, arcpy.Raster],
-                          midflame_ws: Union[float, arcpy.Raster],
-                          units: str) -> Union[float, arcpy.Raster]:
+def getFlameResidenceTime(ros: float | arcpy.Raster,
+                          fuel_consumption: float | arcpy.Raster,
+                          midflame_ws: float | arcpy.Raster,
+                          units: str) -> float | arcpy.Raster:
     """
     Function to calculate flame residence time using equation from Nelson and Adkins (1988)
     :param ros: Fire rate of spread (m/min)
@@ -294,8 +293,8 @@ def getFlameResidenceTime(ros: Union[float, arcpy.Raster],
 
 
 # FUNCTION TO CALCULATE FLAME DEPTH
-def getFlameDepth(ros: Union[float, arcpy.Raster],
-                  res_time: Union[float, arcpy.Raster]):
+def getFlameDepth(ros: float | arcpy.Raster,
+                  res_time: float | arcpy.Raster):
     """
     Calculate flame depth using equation from Fons et al. (1963)
     :param ros: Fire rate of spread (m/min)
