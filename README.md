@@ -140,8 +140,9 @@ installed extension propagates to the caller. Use `backend="python"` or
 `backend="rust"` to select an engine explicitly. Rust supports extended NumPy
 `longdouble` inputs when the extension and NumPy use the same native format.
 
-The NumPy backend suppresses incidental arithmetic warnings. Explicit NumPy
-error modes such as `over="raise"` still apply. The package reports
+Automatic selection also uses NumPy when `numpy.seterr` or `numpy.errstate`
+requests an exception, callback, log, or printed error. The NumPy backend
+suppresses incidental arithmetic warnings. The package reports
 `UserWarning` for conditions such as zero canopy height and a processor count
 below two.
 

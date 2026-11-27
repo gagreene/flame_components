@@ -1,8 +1,17 @@
 # Flame Components for Rust
 
 The library implements mid-flame wind speed, flame length, flame height, flame
-tilt, flame residence time, and flame depth. Its build and runtime dependencies
-are Rust crates. The minimum supported Rust compiler for the library is 1.78.
+tilt, flame residence time, and flame depth. The default build uses Rust crates
+and supports Rust 1.78 and later.
+
+Use a Cargo path dependency on `rust/crates/flame-components` in a source
+checkout. For example, if the checkout is next to your Cargo project, add this
+to your `Cargo.toml`.
+
+```toml
+[dependencies]
+flame-components = { path = "../flame_components/rust/crates/flame-components" }
+```
 
 ```rust
 use flame_components::{depth::flame_depth, Cell};
@@ -36,9 +45,18 @@ Python-reference comparisons with Cargo:
 cargo test --locked --manifest-path rust/Cargo.toml
 ```
 
-The standalone package contains the unit tests and the depth/residence
-integration tests. The repository checkout also supplies the shared frozen
-fixtures for cross-language comparisons.
+To build and verify the source archives, use a current stable Cargo from the
+repository's `rust/` directory.
+
+```text
+cargo +stable package --locked -p flame-components-wide -p flame-components --features flame-components/extended
+```
+
+The library archive contains the unit tests and the depth/residence integration
+tests. The repository checkout also supplies the shared frozen fixtures for
+cross-language comparisons. Packaging the library alone for crates.io requires
+the exact helper version declared in its manifest to be available in the
+registry, even for a default-feature build.
 
 The optional `extended` feature adds the host's C `long double` representation
 and arithmetic to the Rust kernels. Building with this feature requires a C

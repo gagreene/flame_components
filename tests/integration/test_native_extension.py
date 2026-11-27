@@ -237,3 +237,14 @@ def test_division_cutoff_respects_original_numerator_dtype(native, ros_dtype):
     fuel = np.array([1.0], dtype=np.float32)
     wind = np.array([1.0], dtype=np.float32)
     _compare(get_flame_residence_time, ros, fuel, wind, "sec")
+
+
+@pytest.mark.parametrize("value", [1e-8, 3e-8])
+def test_depth_rounds_legacy_mixed_float16_inputs_before_multiplication(native, value):
+    ros = np.array(value, dtype=np.float64)
+    residence = np.array([1000], dtype=np.float16)
+    expected = get_flame_depth(ros, residence, backend="python")
+    actual = get_flame_depth(ros, residence, backend="rust")
+
+    assert actual.dtype == expected.dtype
+    np.testing.assert_array_equal(actual, expected)

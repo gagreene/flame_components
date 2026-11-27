@@ -24,7 +24,12 @@ def _sample(spec):
 
 def _widths(*values, divisions=()):
     widths = [value.dtype.itemsize if value.dtype.kind == "f" else 8 for value in values]
-    for index, numerator in divisions:
+    for index, numerator, denominator in divisions:
+        # Valid 0-D masked-array operations can return ordinary NumPy scalars.
+        # Their subsequent division keeps IEEE infinities and NaNs unmasked.
+        if np.isscalar(numerator) and np.isscalar(denominator):
+            widths[index] |= 4 << 5
+            continue
         # NumPy resolves the mask cutoff using the original numerator dtype.
         cutoff = np.abs(np.asarray(numerator)) * np.finfo(float).tiny
         width = cutoff.dtype.itemsize
@@ -47,11 +52,12 @@ def _height(length, tilt, slope, units):
     relative_tilt = tilt_horizontal - slope_radians
     numerator = length * ma.sin(relative_tilt)
     complement = np.radians(90) - slope_radians
-    sloped_height = numerator / ma.sin(complement)
+    denominator = ma.sin(complement)
+    sloped_height = numerator / denominator
     output = ma.where(slope <= 1, flat_height, sloped_height)
-    divisions = [(7, numerator)]
+    divisions = [(7, numerator, denominator)]
     if units == "percent":
-        divisions.append((2, slope))
+        divisions.append((2, slope, 100))
     return _widths(
         tilt_radians, tilt_horizontal, slope_radians, flat_height, relative_tilt,
         numerator, complement, sloped_height, divisions=divisions,
@@ -66,7 +72,7 @@ def _nelson(length, fire_type, intensity, wind):
     ratio = numerator / wind
     height = ma.where(wind == 0, length, ratio)
     output = ma.where(height > length, length, height)
-    return _widths(numerator, ratio, height, divisions=[(1, numerator)]), output.dtype
+    return _widths(numerator, ratio, height, divisions=[(1, numerator, wind)]), output.dtype
 
 
 @lru_cache(maxsize=128)
@@ -79,9 +85,9 @@ def _tilt(length, height, slope, units):
     tilt_horizontal = ma.arcsin(np.radians(ratio)) + slope_radians
     tilt_vertical = np.pi / 2 - tilt_horizontal
     output = np.degrees(ma.where(height == length, 0, tilt_vertical))
-    divisions = [(3, numerator)]
+    divisions = [(3, numerator, length)]
     if units == "percent":
-        divisions.append((0, slope))
+        divisions.append((0, slope, 100))
     return _widths(
         slope_radians, complement, numerator, ratio, tilt_horizontal, tilt_vertical,
         output, divisions=divisions,
@@ -98,7 +104,7 @@ def _length(intensity, depth, parameters):
     depth_power = ma.power(_sample(depth), parameters[2])
     output = numerator / depth_power
     return _widths(
-        intensity_power, numerator, depth_power, output, divisions=[(3, numerator)]
+        intensity_power, numerator, depth_power, output, divisions=[(3, numerator, depth_power)]
     ), output.dtype
 
 
@@ -112,9 +118,9 @@ def _residence(ros, fuel, wind, units):
     denominator = ros / 60
     seconds = numerator / denominator
     output = seconds / 60 if units == "min" else seconds
-    divisions = [(4, ros), (5, numerator)]
+    divisions = [(4, ros, 60), (5, numerator, denominator)]
     if units == "min":
-        divisions.append((6, seconds))
+        divisions.append((6, seconds, 60))
     return _widths(
         fuel_power, scaled_fuel, wind_power, numerator, denominator, seconds, output,
         divisions=divisions,
@@ -125,12 +131,11 @@ def _residence(ros, fuel, wind, units):
 def _wind(wind, cover, canopy, base, units):
     wind, cover, canopy, base = map(_sample, (wind, cover, canopy, base))
     input_wind = wind
+    wind_divisor = 3.6 * 1.15 if units == "SI" else 2.23694
+    wind = wind / wind_divisor
     if units == "SI":
-        wind = wind / (3.6 * 1.15)
         canopy = canopy * 3.28084
         base = base * 3.28084
-    else:
-        wind = wind / 2.23694
     ht = ma.where(canopy == 0, 0.5 * 3.28084, canopy)
     difference = ht - base
     ratio = difference / ht
@@ -152,19 +157,21 @@ def _wind(wind, cover, canopy, base, units):
         wind, canopy, base, ht, difference, ratio, covered_ratio, shelter, scaled_ht,
         log_numerator, log_denominator, log_argument, unsheltered_numerator, unsheltered,
         sheltered_numerator, sheltered_product, sheltered_denominator, sheltered,
-        divisions=[(0, input_wind), (5, difference), (7, covered_ratio),
-                   (11, log_numerator), (13, unsheltered_numerator), (17, sheltered_numerator)],
+        divisions=[(0, input_wind, wind_divisor),
+                   (5, difference, ht), (7, covered_ratio, 300),
+                   (11, log_numerator, log_denominator), (13, unsheltered_numerator, logarithm),
+                   (17, sheltered_numerator, sheltered_denominator)],
     ), output.dtype
 
 
 @lru_cache(maxsize=128)
 def _butler(wind, canopy, units):
     wind, canopy = map(_sample, (wind, canopy))
-    input_wind = wind
-    if units == "kph":
-        wind = wind / 3.6
-    elif units == "mph":
-        wind = wind / 2.23694
+    divisions = []
+    if units in ("kph", "mph"):
+        divisor = 3.6 if units == "kph" else 2.23694
+        divisions.append((0, wind, divisor))
+        wind = wind / divisor
     canopy_ratio = 28 / canopy
     log_argument = 1 + canopy_ratio
     logarithm = 1 + ma.log(log_argument)
@@ -172,12 +179,14 @@ def _butler(wind, canopy, units):
     canopy_wind = wind / wind_denominator
     cube = ma.power(canopy_wind, 3)
     numerator = 3 * cube
-    fraction = numerator / (2 * 9.81 * 10)
+    denominator = 2 * 9.81 * 10
+    fraction = numerator / denominator
     output = np.degrees(ma.arctan(ma.sqrt(fraction)))
     return _widths(
         wind, canopy_ratio, log_argument, logarithm, wind_denominator, canopy_wind,
         cube, numerator, fraction, output,
-        divisions=[(0, input_wind), (1, 28), (5, wind), (8, numerator)],
+        divisions=[*divisions, (1, 28, canopy), (5, wind, wind_denominator),
+                   (8, numerator, denominator)],
     ), output.dtype
 
 
@@ -185,13 +194,13 @@ def _butler(wind, canopy, units):
 def _standard(length, height):
     length, height = map(_sample, (length, height))
     ratio = height / length
-    return _widths(ratio, divisions=[(0, height)]) * 7, ratio.dtype
+    return _widths(ratio, divisions=[(0, height, length)]) * 7, ratio.dtype
 
 
 def metadata(equation, args, parameters=None):
     """Return native arithmetic widths and the reference's raw output dtype."""
     arrays = [arg for arg in args if isinstance(arg, np.ndarray)]
-    if all(array.dtype == np.dtype("float64") for array in arrays):
+    if all(array.dtype == np.dtype("float64") and array.ndim for array in arrays):
         return None, np.dtype("float64")
 
     with np.errstate(all="ignore"):

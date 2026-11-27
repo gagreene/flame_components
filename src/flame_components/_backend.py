@@ -4,6 +4,8 @@ from importlib import import_module
 from types import ModuleType
 from typing import Literal
 
+from numpy import geterr
+
 _NATIVE_MODULE = "flame_components._native"
 
 
@@ -32,6 +34,8 @@ def resolve_backend(backend: str) -> Literal["python", "rust"]:
         except ModuleNotFoundError as error:
             if error.name != _NATIVE_MODULE:
                 raise
+            return "python"
+        if any(mode in {"raise", "call", "log", "print"} for mode in geterr().values()):
             return "python"
         return "rust"
     return "python"

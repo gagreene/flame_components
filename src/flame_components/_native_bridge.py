@@ -6,11 +6,31 @@ from numpy import ma
 from . import _backend, _equations, _precision
 
 
-def _buffers(array, dtype):
-    return (
-        np.require(ma.getdata(array), dtype=dtype, requirements="A"),
-        np.require(ma.getmaskarray(array), requirements="A"),
-    )
+def _high_rank_shape(args):
+    arrays = [arg for arg in args if isinstance(arg, np.ndarray)]
+    # The native array view supports at most 32 dimensions. NumPy 2 allows 64.
+    if any(array.ndim > 32 for array in arrays):
+        return np.broadcast_shapes(*(array.shape for array in arrays))
+    return None
+
+
+def _buffers(array, dtype, *, round_to=None, shape=None):
+    data = ma.getdata(array)
+    mask = ma.getmaskarray(array)
+    if round_to is not None:
+        with np.errstate(all="ignore"):
+            data = data.astype(round_to, copy=False)
+    if shape is not None:
+        data = np.broadcast_to(data, shape).reshape(-1)
+        mask = np.broadcast_to(mask, shape).reshape(-1)
+    return np.require(data, dtype=dtype, requirements="A"), np.require(mask, requirements="A")
+
+
+def _restore_shape(result, shape):
+    if shape is None:
+        return result
+    data, mask, substituted = result
+    return data.reshape(shape), mask.reshape(shape), substituted
 
 
 def _return_array(data, mask, dtype):
@@ -26,9 +46,10 @@ def _is_extended(dtype):
 
 def _extended_buffers(array, dtype):
     data = np.require(ma.getdata(array), dtype=dtype, requirements=("A", "C"))
-    # A trailing byte axis works for zero-dimensional and empty arrays as well.
-    packet = data.reshape((*data.shape, 1)).view(np.uint8)
-    return packet, np.require(ma.getmaskarray(array), requirements="A")
+    # Keep data and mask ranks fixed even at NumPy's maximum logical rank.
+    packet = data.reshape(-1, 1).view(np.uint8)
+    mask = np.require(ma.getmaskarray(array).reshape(-1), requirements="A")
+    return packet, mask, array.shape
 
 
 def _extended(native, equation, args, precision, equality=None):
@@ -41,17 +62,26 @@ def _extended(native, equation, args, precision, equality=None):
         _extended_buffers(arg, dtype) if isinstance(arg, np.ndarray) else arg
         for arg in args
     )
-    data, mask, substituted = native.extended(equation, buffers, precision, equality=equality)
-    return data.view(dtype).reshape(mask.shape), mask, substituted
+    if equality is not None:
+        equality = (*_buffers(equality.reshape(-1), np.dtype("bool")), equality.shape)
+    data, mask, shape, substituted = native.extended(
+        equation, buffers, precision, equality=equality
+    )
+    return data.view(dtype).reshape(shape), mask.reshape(shape), substituted
 
 
 def _depth(native, args):
     dtype = np.result_type(*(ma.getdata(arg) for arg in args))
     if _is_extended(dtype):
         return _extended(native, "flame_depth", args, None), dtype
-    # A binary16 product fits exactly in binary32 before the final rounding.
-    storage = np.dtype("float32") if dtype == np.dtype("float16") else dtype.newbyteorder("=")
-    return native.flame_depth(*(_buffers(arg, storage) for arg in args)), dtype
+    shape = _high_rank_shape(args)
+    if dtype == np.dtype("float16"):
+        # NumPy rounds the inputs before multiplying. Their product then fits
+        # exactly in binary32 until it is rounded back to binary16.
+        buffers = (_buffers(arg, np.dtype("float32"), round_to=dtype, shape=shape) for arg in args)
+    else:
+        buffers = (_buffers(arg, dtype.newbyteorder("="), shape=shape) for arg in args)
+    return _restore_shape(native.flame_depth(*buffers), shape), dtype
 
 
 def _active_inputs(equation, args):
@@ -78,7 +108,7 @@ def _finney_equality(length, height):
     except ValueError:
         # Let the Rust kernel report the incompatible operands in equation order.
         return None
-    return _buffers(height == length, np.dtype("bool"))
+    return height == length
 
 
 def run(equation, *args):
@@ -102,14 +132,19 @@ def run(equation, *args):
         if wide_inputs:
             result = _extended(native, equation, args, precision, equality)
         else:
+            shape = _high_rank_shape(args)
             inputs = tuple(
-                _buffers(arg, np.dtype("float64")) if isinstance(arg, np.ndarray) else arg
+                _buffers(arg, np.dtype("float64"), shape=shape) if isinstance(arg, np.ndarray) else arg
                 for arg in args
             )
             options = {} if precision is None else {"precision": precision}
             if equality is not None:
-                options["equality"] = equality
-            result = getattr(native, equation)(*inputs, **options)
+                options["equality"] = _buffers(equality, np.dtype("bool"), shape=shape)
+            result = _restore_shape(getattr(native, equation)(*inputs, **options), shape)
+            if shape is not None and 0 in shape and equation == "mid_flame_ws":
+                # Substitution is reported even if later broadcasting yields no cells.
+                data, mask, substituted = result
+                result = data, mask, substituted or bool(ma.any(args[2] == 0))
 
     data, mask, substituted = result
     return _return_array(data, mask, dtype), substituted

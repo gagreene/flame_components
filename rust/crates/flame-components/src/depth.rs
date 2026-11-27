@@ -47,7 +47,7 @@ macro_rules! float_depth {
             }
 
             fn clamp_nonnegative(self) -> Self {
-                if self > 0.0 { self } else { 0.0 }
+                if self < 0.0 { 0.0 } else { self }
             }
         })+
     };

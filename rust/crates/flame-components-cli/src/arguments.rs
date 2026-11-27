@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::fmt;
 use std::fs;
 use std::io::{self, Read};
 use std::path::Path;
 
 use flame_components::Cell;
+use serde::de::{self, Deserialize, Deserializer, MapAccess, Visitor};
 use serde_json::Value;
 
 pub(crate) struct Arguments(BTreeMap<String, Argument>);
@@ -56,20 +58,7 @@ impl Arguments {
             fs::read(path)
                 .map_err(|error| format!("could not read JSON file {}: {error}", path.display()))?
         };
-        let root = serde_json::from_slice(&data)
-            .map_err(|error| format!("could not parse JSON: {error}"))?;
-        let Value::Object(fields) = root else {
-            return Err("expected a JSON object of scalar arguments".to_owned());
-        };
-
-        let mut arguments = Self(BTreeMap::new());
-        for (name, value) in fields {
-            if value.is_array() || value.is_object() {
-                return Err(format!("expected a scalar JSON value for {name:?}"));
-            }
-            arguments.insert(name.replace('_', "-"), Argument::Json(value))?;
-        }
-        Ok(arguments)
+        serde_json::from_slice(&data).map_err(|error| format!("could not parse JSON: {error}"))
     }
 
     fn insert(&mut self, name: String, argument: Argument) -> Result<(), String> {
@@ -128,6 +117,37 @@ impl Arguments {
             Some(Argument::Json(Value::Bool(value))) => Ok(value),
             _ => Err("expected a boolean for params_only".to_owned()),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Arguments {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ArgumentsVisitor;
+
+        impl<'de> Visitor<'de> for ArgumentsVisitor {
+            type Value = Arguments;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a JSON object of scalar arguments")
+            }
+
+            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+                let mut arguments = Arguments(BTreeMap::new());
+                while let Some((name, value)) = map.next_entry::<String, Value>()? {
+                    if value.is_array() || value.is_object() {
+                        return Err(de::Error::custom(format!(
+                            "expected a scalar JSON value for {name:?}"
+                        )));
+                    }
+                    arguments
+                        .insert(name.replace('_', "-"), Argument::Json(value))
+                        .map_err(de::Error::custom)?;
+                }
+                Ok(arguments)
+            }
+        }
+
+        deserializer.deserialize_map(ArgumentsVisitor)
     }
 }
 

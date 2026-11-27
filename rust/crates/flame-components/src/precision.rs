@@ -54,13 +54,15 @@ pub(crate) trait Stage<T: ModelValue>: Copy {
 
 /// NumPy's safe-divide cutoff can have a different dtype from the quotient.
 /// The low five bits encode the quotient width in bytes. The upper bits select
-/// the cutoff arithmetic; zero preserves explicit-width Rust caller behavior.
+/// the cutoff arithmetic or ordinary scalar division. Zero preserves the
+/// explicit-width Rust caller behavior.
 #[derive(Clone, Copy)]
 pub(crate) enum DivideCutoff {
     Legacy,
     RoundedToZero,
     Double,
     Native,
+    Scalar,
 }
 
 impl DivideCutoff {
@@ -70,6 +72,7 @@ impl DivideCutoff {
             1 => Self::RoundedToZero,
             2 => Self::Double,
             3 => Self::Native,
+            4 => Self::Scalar,
             _ => return Err(Error::InvalidFloatWidth(stage)),
         };
         Ok((stage & 31, cutoff))
@@ -112,9 +115,7 @@ impl Precision {
     }
 
     pub(crate) fn quotient(self, left: Cell<f64>, right: Cell<f64>) -> Cell<f64> {
-        let mut result = self.binary(left, right, |a, b| a / b);
-        result.masked |= !result.value.is_finite();
-        result
+        self.binary(left, right, |a, b| a / b)
     }
 
     fn cast(self, value: f64) -> f64 {
@@ -179,6 +180,8 @@ impl Stage<f64> for Precision {
         let mut quotient = self.quotient(left, right);
         if !quotient.masked {
             quotient.masked = match self.cutoff {
+                DivideCutoff::Scalar => false,
+                _ if !quotient.value.is_finite() => true,
                 DivideCutoff::RoundedToZero => false,
                 DivideCutoff::Legacy => {
                     self.cast(left.value).abs() * f64::MIN_POSITIVE >= self.cast(right.value).abs()

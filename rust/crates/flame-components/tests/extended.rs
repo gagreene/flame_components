@@ -9,6 +9,22 @@ use flame_components::residence::ResidenceUnits;
 use flame_components::Cell;
 
 #[test]
+fn depth_keeps_unmasked_nan_and_negative_zero() {
+    for (rate, time, expected) in [(f64::INFINITY, 0.0, f64::NAN), (-0.0, 1.0, -0.0_f64)] {
+        let rate = arr0(Cell::present(LongDouble::from_f64(rate)));
+        let time = arr0(Cell::present(LongDouble::from_f64(time)));
+        let depth = flame_depth_array(rate.view().into_dyn(), time.view().into_dyn()).unwrap();
+        let cell = depth[[]].nonnegative();
+        assert!(!cell.masked);
+        if expected.is_nan() {
+            assert!(cell.value.is_nan());
+        } else {
+            assert_eq!(cell.value.to_f64().to_bits(), expected.to_bits());
+        }
+    }
+}
+
+#[test]
 fn depth_preserves_the_last_significand_bit_and_tilt_tests_it() {
     let (width, mantissa, _, _) = format();
     let one = LongDouble::from_f64(1.0);
@@ -76,4 +92,35 @@ fn residence_division_uses_the_numerators_cutoff_precision() {
     assert!((single_cutoff.value.to_f64() / 7.8e307 - 1.0).abs() < 1e-6);
     assert!(residence(2).masked);
     assert!(residence(3).masked);
+}
+
+#[test]
+fn ordinary_division_keeps_infinity_and_propagates_operand_masks() {
+    let width = format().0 as u8;
+    let one = arr0(Cell::present(LongDouble::from_f64(1.0)));
+    for quotient_width in [4, width] {
+        let widths = [4, 4, 4, 4, width, quotient_width | (4 << 5), width];
+        let divide = |denominator| {
+            let denominator = arr0(denominator);
+            flame_residence_time_array_with_precision(
+                denominator.view().into_dyn(),
+                one.view().into_dyn(),
+                one.view().into_dyn(),
+                ResidenceUnits::Seconds,
+                widths,
+            )
+            .unwrap()[[]]
+        };
+        let zero = LongDouble::from_f64(0.0);
+        let quotient = divide(Cell::present(zero));
+        assert!(!quotient.masked);
+        assert!(quotient.value.to_f64().is_infinite());
+        assert!(
+            divide(Cell {
+                value: zero,
+                masked: true
+            })
+            .masked
+        );
+    }
 }

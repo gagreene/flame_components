@@ -94,3 +94,21 @@ fn residence_broadcasts_constants_across_a_masked_vector() {
     assert!((result[0].value - 11.7).abs() < 1e-14);
     assert!(result[1].masked);
 }
+
+#[test]
+fn standalone_clamp_preserves_nan_and_signed_zero() {
+    let computed_nan = flame_depth(Cell::present(f64::INFINITY), Cell::present(0.0));
+    assert!(computed_nan.nonnegative().value.is_nan());
+    let negative_zero = Cell::present(-0.0_f32).nonnegative().value;
+    assert!(negative_zero.is_sign_negative());
+}
+
+#[test]
+fn both_barbon_selectors_identify_the_same_model() {
+    use flame_components::length::LengthModel;
+
+    assert_eq!(
+        "Barbon_iNOWIND".parse::<LengthModel>().unwrap(),
+        "Barbon_NOWIND".parse::<LengthModel>().unwrap()
+    );
+}

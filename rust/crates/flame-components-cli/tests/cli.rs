@@ -131,17 +131,20 @@ fn rejects_integer_tokens_outside_the_signed_64_bit_range() {
 }
 
 #[test]
-fn output_mask_is_distinct_from_infinity_and_a_clamped_nan() {
+fn output_clamp_preserves_unmasked_nan_and_signed_zero() {
     let args = ["flame-depth", "--json", "-"];
     for (input, expected) in [
         (r#"{"ros":"Infinity","res_time":2}"#, json!("Infinity")),
-        (r#"{"ros":"Infinity","res_time":0}"#, json!(0.0)),
+        (r#"{"ros":"Infinity","res_time":0}"#, json!("NaN")),
         (r#"{"ros":"-Infinity","res_time":2}"#, json!(0.0)),
         (r#"{"ros":"NaN","res_time":2}"#, Value::Null),
         (r#"{"ros":null,"res_time":2}"#, Value::Null),
     ] {
         assert_eq!(result(&run(&args, Some(input))), expected);
     }
+    let output = run(&args, Some(r#"{"ros":-0.0,"res_time":2}"#));
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"-0.0\n");
 
     let output = run(
         &[
@@ -193,6 +196,14 @@ fn coefficients_can_be_looked_up_without_measurements() {
         Some(r#"{"model":"Finney_HEAD","params_only":true}"#),
     );
     assert_eq!(result(&output), json!([0.01051, 0.774, 0.161]));
+}
+
+#[test]
+fn accepts_the_legacy_barbon_model_selector() {
+    for model in ["Barbon_NOWIND", "Barbon_iNOWIND"] {
+        let output = run(&["flame-length", "--model", model, "--params-only"], None);
+        assert_eq!(result(&output), json!([0.062, 0.5336]));
+    }
 }
 
 #[test]
@@ -248,11 +259,18 @@ fn scalar_commands_match_the_shared_reference_fixtures() {
         } else if case["clamped_mask"][index] == true {
             assert_eq!(actual, Value::Null, "{id}");
         } else {
-            let expected = fixture_scalar(&case["output"]["data"][index]).unwrap();
+            // The standalone clamp retains these kernel payloads. The Python facade maps them to zero.
+            let source = match id {
+                "depth_signed_zero" | "depth_infinity_times_zero" => "kernel_result",
+                _ => "output",
+            };
+            let expected = fixture_scalar(&case[source]["data"][index]).unwrap();
             if expected.is_f64() {
                 let tolerance = case["rtol"].as_f64().unwrap_or(0.0);
                 let expected = expected.as_f64().unwrap();
-                let actual = actual.as_f64().unwrap();
+                let actual = actual
+                    .as_f64()
+                    .unwrap_or_else(|| panic!("{id}: expected {expected}, received {actual}"));
                 assert!(
                     (actual - expected).abs() <= tolerance * expected.abs(),
                     "{id}: {actual} != {expected}"
@@ -322,6 +340,17 @@ fn invalid_input_goes_to_stderr_and_fails() {
         ),
         "canopy height must be positive",
     );
+}
+
+#[test]
+fn rejects_repeated_json_arguments() {
+    let args = ["flame-depth", "--json", "-"];
+    for input in [
+        r#"{"ros":1,"ros":3,"res_time":2}"#,
+        r#"{"ros":3,"res_time":1,"res-time":2}"#,
+    ] {
+        assert_error(run(&args, Some(input)), "was supplied more than once");
+    }
 }
 
 #[test]

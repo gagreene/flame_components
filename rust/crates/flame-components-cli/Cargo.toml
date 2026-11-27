@@ -13,4 +13,5 @@ path = "src/main.rs"
 
 [dependencies]
 flame-components = { path = "../flame-components" }
+serde = "1.0"
 serde_json = { workspace = true, features = ["arbitrary_precision"] }

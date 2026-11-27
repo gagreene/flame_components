@@ -73,3 +73,20 @@ jobs:
           name: cli-${{ matrix.platform }}
           path: cli/*
           if-no-files-found: error
+
+  cargo-package:
+    name: Verify Cargo source archives
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Package and verify the library and its long-double helper
+        run: cargo +stable package --locked -p flame-components-wide -p flame-components --features flame-components/extended

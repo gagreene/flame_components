@@ -37,6 +37,7 @@ macro_rules! length_models {
             fn from_str(selector: &str) -> Result<Self, Self::Err> {
                 match selector {
                     $($selector => Ok(Self::$variant),)+
+                    "Barbon_iNOWIND" => Ok(Self::BarbonNoWind),
                     _ => Err(Error::UnknownLengthModel(selector.to_owned())),
                 }
             }

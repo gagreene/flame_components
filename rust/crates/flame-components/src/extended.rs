@@ -4,7 +4,8 @@
 //! kernel. A larger width must match the host long-double storage size.
 //! For division, the upper three bits can select the NumPy safe-divide cutoff
 //! precision: 0 uses the default, 1 rounds the tiny multiplier to zero,
-//! 2 uses binary64, and 3 uses the native long double.
+//! 2 uses binary64, 3 uses the native long double, and 4 selects ordinary
+//! scalar division which only propagates existing masks.
 
 use ndarray::{ArrayD, ArrayViewD};
 
@@ -27,10 +28,10 @@ impl DepthValue for LongDouble {
 
     fn clamp_nonnegative(self) -> Self {
         let zero = Self::from_f64(0.0);
-        if self > zero {
-            self
-        } else {
+        if self < zero {
             zero
+        } else {
+            self
         }
     }
 }
@@ -147,13 +148,15 @@ impl Stage<LongDouble> for LongDoubleStage {
                 }
                 p.quotient(a, b).map(LongDouble::from_f64)
             }
-            LongDoubleWidth::Native => finite(Cell {
+            LongDoubleWidth::Native => Cell {
                 value: left.value.div(right.value),
                 masked: left.masked || right.masked,
-            }),
+            },
         };
         if !quotient.masked {
             quotient.masked = match self.cutoff {
+                DivideCutoff::Scalar => false,
+                _ if !quotient.value.is_finite() => true,
                 DivideCutoff::RoundedToZero => false,
                 DivideCutoff::Double => {
                     LongDouble::from_f64(left.value.to_f64().abs() * f64::MIN_POSITIVE)

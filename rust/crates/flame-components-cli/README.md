@@ -29,7 +29,7 @@ flame-components flame-length --model Finney_HEAD --params-only
 The depth example prints `6` metres. The lookup prints `[0.01051,0.774,0.161]`
 in coefficient, intensity exponent, and depth exponent order. Lookup requires
 only the model selector. See the [library's model table](../flame-components/src/length.rs)
-for all flame-length selectors.
+for all flame-length selectors. `Barbon_iNOWIND` is an alias for `Barbon_NOWIND`.
 
 Wind speed outputs use metres per second. The default `SI` wind inputs use
 kilometres per hour at 10 m and canopy heights in metres. `IMP` inputs use miles
@@ -40,7 +40,8 @@ the names `surface`, `passive crown`, and `active crown`. Quote names with space
 ## JSON input and output
 
 Pass a single JSON object from a file or pipe it to standard input. Use
-underscores or hyphens in keys that correspond to multiword flags.
+underscores or hyphens in keys that correspond to multiword flags. Supply each
+argument once, including when using different spellings of the same key.
 
 ```sh
 flame-components flame-depth --json measurements.json
@@ -63,7 +64,8 @@ floating-point input. With an integer and a floating-point depth input, both
 use binary64. The other equations use binary64 for measurements.
 
 Successful calculations write one JSON value and a newline to stdout. The
-equations apply a nonnegative clamp before serialization. Masked results use
-`null`. Unmasked non-finite results use the strings `"Infinity"`, `"-Infinity"`,
-and `"NaN"`. CLI diagnostics go to stderr. Invalid input exits with status 2
-and leaves stdout empty.
+clamp changes negative results, including negative infinity, to zero. It
+preserves signed zero and unmasked NaN. Masked results use `null`. Positive
+infinity and unmasked NaN use the strings `"Infinity"` and `"NaN"`.
+CLI diagnostics go to stderr. Invalid input exits with status 2 and leaves
+stdout empty.

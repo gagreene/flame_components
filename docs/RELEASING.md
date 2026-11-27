@@ -28,9 +28,10 @@ be automated from a local session.
    worktree is clean.
 2. Set the release SemVer in `[workspace.package]` in `rust/Cargo.toml`, refresh
    `rust/Cargo.lock` with `cargo update --workspace --manifest-path rust/Cargo.toml`,
-   and get those changes onto `master` before tagging. All workspace crates inherit
-   this version. Maturin derives the Python version from the extension crate and
-   converts it to PEP 440. Cargo `0.2.0-rc.1` becomes Python `0.2.0rc1`.
+   and get those changes onto `master` before tagging. The library, CLI, and Python
+   extension inherit this version. Maturin derives the Python version from the
+   extension crate and converts it to PEP 440. Cargo `0.2.0-rc.1` becomes Python
+   `0.2.0rc1`.
 3. Create and push an annotated tag with the matching Python version.
 
    ```bash
@@ -56,10 +57,30 @@ be automated from a local session.
    run `python scripts/smoke_test.py --backend rust` from a checkout. For a TestPyPI
    rehearsal, use the TestPyPI release with NumPy installed from PyPI.
 
-The internal long-double arithmetic crate has a separate ABI version. The public package, library, and CLI share the workspace release version.
-
 Wheels include the Rust extension. Installing the source distribution requires a
 Rust toolchain and a C compiler for the extended-precision arithmetic shim. The standalone CLI runs independently of the Python package.
+
+## Rust source archives and registry order
+
+The standalone library can be used as a Cargo path dependency from the checkout.
+From `rust/`, use a current stable Cargo to package both crates and verify the
+library archive against the packaged long-double helper.
+
+```bash
+cargo +stable package --locked -p flame-components-wide -p flame-components --features flame-components/extended
+```
+
+GitHub's standalone Rust workflow verifies the archives. Registry publication
+requires a separate release step. For a crates.io release, publish
+`flame-components-wide` first and wait for the exact required version to appear
+in the registry index before packaging or publishing `flame-components` alone.
+Cargo resolves the optional helper dependency during packaging even when the
+`extended` feature is disabled. Until the required helper version is available
+on crates.io, package the two crates together from the checkout.
+
+The helper tracks its own ABI version. Change that version separately from the
+workspace release version and update the library's exact dependency requirement
+when releasing a new helper version.
 
 ## What goes in release notes
 

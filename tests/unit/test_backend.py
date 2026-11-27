@@ -130,3 +130,22 @@ def test_rust_dispatches_normalized_data_masks_and_raw_results(monkeypatch, back
     assert calls[0][0].dtype == np.uint8
     np.testing.assert_array_equal(calls[0][1], [False, True])
     np.testing.assert_array_equal(result, [4, np.nan])
+
+
+@pytest.mark.parametrize("mode", ["raise", "call", "log", "print"])
+def test_auto_keeps_explicit_numpy_error_modes(monkeypatch, mode):
+    extension = ModuleType("flame_components._native")
+    monkeypatch.setitem(sys.modules, extension.__name__, extension)
+
+    with np.errstate(over=mode):
+        assert _backend.resolve_backend("auto") == "python"
+        assert _backend.resolve_backend("rust") == "rust"
+
+
+def test_auto_preserves_a_numpy_floating_point_exception(monkeypatch):
+    extension = ModuleType("flame_components._native")
+    extension.flame_depth = lambda *_: pytest.fail("Strict NumPy policy must use NumPy")
+    monkeypatch.setitem(sys.modules, extension.__name__, extension)
+
+    with np.errstate(over="raise"), pytest.raises(FloatingPointError, match="overflow"):
+        core.get_flame_depth(np.array([1e308]), 2.0)
