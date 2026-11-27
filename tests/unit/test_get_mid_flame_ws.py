@@ -1,7 +1,8 @@
 # tests/unit/test_get_mid_flame_ws.py
 """Unit tests for get_mid_flame_ws."""
-import pytest
 import numpy as np
+import pytest
+
 from flame_components import get_mid_flame_ws
 
 

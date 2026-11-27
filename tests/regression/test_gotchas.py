@@ -4,12 +4,13 @@ Regression tests for bugs documented in docs/CODEBASE.md and fixed in
 docs/GOTCHAS_FIX_PLAN.md. These must never regress.
 Updated to use snake_case function names (snake_case since 0.1.0).
 """
-import pytest
 import numpy as np
+import pytest
+
 from flame_components import (
+    flame_component_array_multiprocessing,
     get_flame_height,
     get_flame_residence_time,
-    flame_component_array_multiprocessing,
 )
 
 

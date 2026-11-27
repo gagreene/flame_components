@@ -3,15 +3,16 @@
 Integration tests: chains of flame_components functions used as in real workflows.
 These tests verify that output from one function feeds correctly into another.
 """
-import pytest
 import numpy as np
+import pytest
+
 from flame_components import (
-    get_mid_flame_ws,
-    get_flame_length,
-    get_flame_height,
-    get_flame_tilt,
-    get_flame_residence_time,
     get_flame_depth,
+    get_flame_height,
+    get_flame_length,
+    get_flame_residence_time,
+    get_flame_tilt,
+    get_mid_flame_ws,
 )
 
 
