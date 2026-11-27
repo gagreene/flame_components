@@ -11,6 +11,8 @@ mod cell;
 mod precision;
 
 pub mod depth;
+#[cfg(feature = "extended")]
+pub mod extended;
 pub mod height;
 pub mod length;
 pub mod residence;
@@ -26,7 +28,7 @@ use std::fmt;
 /// Failures in requests to the standalone engine.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Error {
-    /// A kernel precision must be a 2-, 4-, or 8-byte IEEE floating-point type.
+    /// A stage requested a width unavailable for its numeric type.
     InvalidFloatWidth(u8),
     /// The trailing dimensions do not broadcast.
     IncompatibleShapes { shapes: Vec<Vec<usize>> },

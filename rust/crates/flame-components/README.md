@@ -39,3 +39,8 @@ cargo test --locked --manifest-path rust/Cargo.toml
 The standalone package contains the unit tests and the depth/residence
 integration tests. The repository checkout also supplies the shared frozen
 fixtures for cross-language comparisons.
+
+The optional `extended` feature adds the host's C `long double` representation
+and arithmetic to the Rust kernels. Building with this feature requires a C
+compiler. The Python extension enables it to preserve compatible NumPy
+`longdouble` values and masks through the Rust models.

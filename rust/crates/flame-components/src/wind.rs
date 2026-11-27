@@ -4,7 +4,7 @@ use std::fmt;
 
 use ndarray::{ArrayD, ArrayViewD};
 
-use crate::precision::Precision;
+use crate::precision::{constant, ModelValue, Precision, Stage};
 use crate::{array, Cell, Error};
 
 const FEET_PER_METRE: f64 = 3.28084;
@@ -48,9 +48,13 @@ impl std::error::Error for WindError {
     }
 }
 
-fn canopy_height_feet(height: Cell<f64>, units: WindUnits, precision: Precision) -> Cell<f64> {
+fn canopy_height_feet<T: ModelValue>(
+    height: Cell<T>,
+    units: WindUnits,
+    precision: T::Stage,
+) -> Cell<T> {
     match units {
-        WindUnits::Si => precision.mul(height, FEET_PER_METRE.into()),
+        WindUnits::Si => precision.mul(height, constant(FEET_PER_METRE)),
         WindUnits::Imperial => height,
     }
 }
@@ -76,44 +80,49 @@ pub fn mid_flame_ws(
     )
 }
 
-fn wind_at_precision(
-    wind_speed: Cell<f64>,
-    canopy_cover: Cell<f64>,
-    canopy_ht: Cell<f64>,
-    canopy_baseht: Cell<f64>,
+fn wind_at_precision<T: ModelValue>(
+    wind_speed: Cell<T>,
+    canopy_cover: Cell<T>,
+    canopy_ht: Cell<T>,
+    canopy_baseht: Cell<T>,
     units: WindUnits,
-    precision: [Precision; 18],
-) -> WindResult<Cell<f64>> {
+    precision: [T::Stage; 18],
+) -> WindResult<Cell<T>> {
     let [wind, ht, base, stand, depth, crown, cover, fraction, profile_ht, offset, roughness, logarithm, open_wind, unsheltered, crown_wind, covered_ht, sheltered_profile, sheltered] =
         precision;
     let wind_divisor = match units {
         WindUnits::Si => 3.6 * 1.15,
         WindUnits::Imperial => 2.23694,
     };
-    let wind_speed = wind.div(wind_speed, wind_divisor.into());
+    let wind_speed = wind.div(wind_speed, constant(wind_divisor));
     let canopy_ht = canopy_height_feet(canopy_ht, units, ht);
     let canopy_baseht = canopy_height_feet(canopy_baseht, units, base);
 
-    let zero_height = canopy_ht.eq_cell(0.0);
+    let zero_height = canopy_ht.eq_cell(constant(0.0));
     let canopy_ht = stand.convert(Cell::select(
         zero_height,
-        (0.5 * FEET_PER_METRE).into(),
+        constant(0.5 * FEET_PER_METRE),
         canopy_ht,
     ));
     let crown_ratio = crown.div(depth.sub(canopy_ht, canopy_baseht), canopy_ht);
-    let canopy_fraction = fraction.div(cover.mul(crown_ratio, canopy_cover), 300.0.into());
-    let profile_height = offset.add(20.0.into(), profile_ht.mul(0.36.into(), canopy_ht));
+    let canopy_fraction = fraction.div(cover.mul(crown_ratio, canopy_cover), constant(300.0));
+    let profile_height = offset.add(constant(20.0), profile_ht.mul(constant(0.36), canopy_ht));
     let wind_profile =
-        logarithm.log(logarithm.div(profile_height, roughness.mul(0.13.into(), canopy_ht)));
-    let unsheltered_speed = unsheltered.div(open_wind.mul(wind_speed, 1.83.into()), wind_profile);
+        logarithm.log(logarithm.div(profile_height, roughness.mul(constant(0.13), canopy_ht)));
+    let unsheltered_speed =
+        unsheltered.div(open_wind.mul(wind_speed, constant(1.83)), wind_profile);
     let effective_height = covered_ht.sqrt(covered_ht.mul(canopy_fraction, canopy_ht));
     let sheltered_speed = sheltered.div(
-        crown_wind.mul(wind_speed, 0.555.into()),
+        crown_wind.mul(wind_speed, constant(0.555)),
         sheltered_profile.mul(effective_height, wind_profile),
     );
 
     WindResult {
-        value: Cell::select(canopy_fraction.le(5.0), unsheltered_speed, sheltered_speed),
+        value: Cell::select(
+            canopy_fraction.le(constant(5.0)),
+            unsheltered_speed,
+            sheltered_speed,
+        ),
         substituted_canopy_height: !zero_height.masked && zero_height.value,
     }
 }
@@ -158,12 +167,30 @@ pub fn mid_flame_ws_array_with_precision(
     units: WindUnits,
     widths: [u8; 18],
 ) -> Result<WindResult<ArrayD<Cell<f64>>>, WindError> {
-    let precision = Precision::widths(widths).map_err(|error| WindError {
+    mid_flame_ws_array_at_widths(
+        wind_speed,
+        canopy_cover,
+        canopy_ht,
+        canopy_baseht,
+        units,
+        widths,
+    )
+}
+
+pub(crate) fn mid_flame_ws_array_at_widths<T: ModelValue>(
+    wind_speed: ArrayViewD<'_, Cell<T>>,
+    canopy_cover: ArrayViewD<'_, Cell<T>>,
+    canopy_ht: ArrayViewD<'_, Cell<T>>,
+    canopy_baseht: ArrayViewD<'_, Cell<T>>,
+    units: WindUnits,
+    widths: [u8; 18],
+) -> Result<WindResult<ArrayD<Cell<T>>>, WindError> {
+    let precision = T::Stage::widths(widths).map_err(|error| WindError {
         error,
         substituted_canopy_height: false,
     })?;
     let substituted_canopy_height = canopy_ht.iter().any(|&height| {
-        let zero_height = canopy_height_feet(height, units, precision[1]).eq_cell(0.0);
+        let zero_height = canopy_height_feet(height, units, precision[1]).eq_cell(constant(0.0));
         !zero_height.masked && zero_height.value
     });
     let value = array::broadcast(

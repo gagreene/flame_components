@@ -1,0 +1,55 @@
+#![cfg(feature = "extended")]
+
+use flame_components::extended::{
+    flame_depth_array, flame_residence_time_array_with_precision, format,
+    standard_tilt_array_with_precision, LongDouble,
+};
+use flame_components::ndarray::arr0;
+use flame_components::residence::ResidenceUnits;
+use flame_components::Cell;
+
+#[test]
+fn depth_preserves_the_last_significand_bit_and_tilt_tests_it() {
+    let (width, mantissa, _, _) = format();
+    let one = LongDouble::from_f64(1.0);
+    let delta = LongDouble::from_f64(2.0f64.powi(1 - mantissa as i32));
+    let next = arr0(Cell::present(one.add(delta)));
+    let base = arr0(Cell::present(one));
+    let depth = flame_depth_array(next.view().into_dyn(), base.view().into_dyn()).unwrap();
+    assert_eq!(depth[[]], next[()]);
+    assert!(depth[[]].value > one);
+
+    // Arccos rejects a ratio one native ulp above one.
+    let tilt = standard_tilt_array_with_precision(
+        base.view().into_dyn(),
+        next.view().into_dyn(),
+        width as u8,
+    )
+    .unwrap();
+    assert!(tilt[[]].masked);
+    let single =
+        standard_tilt_array_with_precision(base.view().into_dyn(), next.view().into_dyn(), 4)
+            .unwrap();
+    assert_eq!(single[[]], Cell::present(LongDouble::from_f64(0.0)));
+}
+
+#[test]
+fn a_single_precision_stage_can_mask_a_wide_residence_result() {
+    let width = format().0 as u8;
+    let one = arr0(Cell::present(LongDouble::from_f64(1.0)));
+    let wind = arr0(Cell::present(LongDouble::from_f64(1e30)));
+    let residence = |widths| {
+        flame_residence_time_array_with_precision(
+            one.view().into_dyn(),
+            one.view().into_dyn(),
+            wind.view().into_dyn(),
+            ResidenceUnits::Seconds,
+            widths,
+        )
+        .unwrap()[[]]
+    };
+    assert!(!residence([width; 7]).masked);
+    let mut mixed = [width; 7];
+    mixed[2] = 4;
+    assert!(residence(mixed).masked);
+}

@@ -2,7 +2,7 @@
 
 use ndarray::{ArrayD, ArrayViewD};
 
-use crate::precision::Precision;
+use crate::precision::{constant, ModelValue, Precision, Stage};
 use crate::{array::broadcast, Cell, Error};
 
 /// Unit for the output residence time. Spread rate is always in m/min.
@@ -31,20 +31,20 @@ pub fn flame_residence_time(
     )
 }
 
-fn residence_time(
-    ros: Cell<f64>,
-    fuel: Cell<f64>,
-    wind: Cell<f64>,
+fn residence_time<T: ModelValue>(
+    ros: Cell<T>,
+    fuel: Cell<T>,
+    wind: Cell<T>,
     units: ResidenceUnits,
-    precision: [Precision; 7],
-) -> Cell<f64> {
+    precision: [T::Stage; 7],
+) -> Cell<T> {
     let [fuel_power, coefficient, wind_power, product, rate, division, minutes] = precision;
-    let fuel_factor = coefficient.mul(0.39.into(), fuel_power.pow(fuel, 0.25));
+    let fuel_factor = coefficient.mul(constant(0.39), fuel_power.pow(fuel, 0.25));
     let numerator = product.mul(fuel_factor, wind_power.pow(wind, 1.51));
-    let residence_time = division.div(numerator, rate.div(ros, 60.0.into()));
+    let residence_time = division.div(numerator, rate.div(ros, constant(60.0)));
     match units {
         ResidenceUnits::Seconds => residence_time,
-        ResidenceUnits::Minutes => minutes.div(residence_time, 60.0.into()),
+        ResidenceUnits::Minutes => minutes.div(residence_time, constant(60.0)),
     }
 }
 
@@ -68,7 +68,17 @@ pub fn flame_residence_time_array_with_precision(
     units: ResidenceUnits,
     widths: [u8; 7],
 ) -> Result<ArrayD<Cell<f64>>, Error> {
-    let precision = Precision::widths(widths)?;
+    flame_residence_time_array_at_widths(ros, fuel_consumption, midflame_ws, units, widths)
+}
+
+pub(crate) fn flame_residence_time_array_at_widths<T: ModelValue>(
+    ros: ArrayViewD<'_, Cell<T>>,
+    fuel_consumption: ArrayViewD<'_, Cell<T>>,
+    midflame_ws: ArrayViewD<'_, Cell<T>>,
+    units: ResidenceUnits,
+    widths: [u8; 7],
+) -> Result<ArrayD<Cell<T>>, Error> {
+    let precision = T::Stage::widths(widths)?;
     broadcast(
         [ros.view(), fuel_consumption.view(), midflame_ws.view()],
         |[ros, fuel_consumption, midflame_ws]| {

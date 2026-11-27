@@ -80,26 +80,28 @@ impl<F: NdFloat> Cell<F> {
     }
 }
 
-impl Cell<f64> {
-    fn binary<U>(self, rhs: Self, f: impl FnOnce(f64, f64) -> U) -> Cell<U> {
+impl<T: PartialOrd> Cell<T> {
+    fn binary<U>(self, rhs: Self, f: impl FnOnce(T, T) -> U) -> Cell<U> {
         Cell {
             value: f(self.value, rhs.value),
             masked: self.masked || rhs.masked,
         }
     }
 
-    pub(crate) fn eq_cell(self, rhs: impl Into<Self>) -> Cell<bool> {
-        self.binary(rhs.into(), |a, b| a == b)
+    pub(crate) fn eq_cell(self, rhs: Self) -> Cell<bool> {
+        self.binary(rhs, |a, b| a == b)
     }
 
-    pub(crate) fn le(self, rhs: impl Into<Self>) -> Cell<bool> {
-        self.binary(rhs.into(), |a, b| a <= b)
+    pub(crate) fn le(self, rhs: Self) -> Cell<bool> {
+        self.binary(rhs, |a, b| a <= b)
     }
 
-    pub(crate) fn gt(self, rhs: impl Into<Self>) -> Cell<bool> {
-        self.binary(rhs.into(), |a, b| a > b)
+    pub(crate) fn gt(self, rhs: Self) -> Cell<bool> {
+        self.binary(rhs, |a, b| a > b)
     }
+}
 
+impl Cell<f64> {
     pub(crate) fn powf(self, exponent: f64) -> Self {
         self.finite_result(|value| value.powf(exponent))
     }
@@ -165,6 +167,7 @@ cell_scalar_operands!(Div, div);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::precision::Stage;
 
     #[test]
     fn division_masks_domain_and_non_finite_quotients() {

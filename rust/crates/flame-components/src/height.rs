@@ -4,7 +4,7 @@ use std::f64::consts::FRAC_PI_2;
 
 use ndarray::{ArrayD, ArrayViewD};
 
-use crate::precision::Precision;
+use crate::precision::{constant, ModelValue, Precision, Stage};
 use crate::{array::broadcast, Cell, Error, SlopeUnits};
 
 /// Fire classes used by the Nelson flame-height model.
@@ -55,31 +55,40 @@ pub enum HeightModel<T> {
     },
 }
 
-fn validate_fire_type(fire_type: Cell<f64>) -> Result<(), Error> {
-    if !fire_type.masked {
-        FireType::try_from(fire_type.value)?;
+fn validate_fire_type<T: ModelValue>(fire_type: Cell<T>) -> Result<(), Error> {
+    if !fire_type.masked
+        && ![1.0, 2.0, 3.0]
+            .iter()
+            .any(|&code| fire_type.value == T::from_f64(code))
+    {
+        return Err(Error::InvalidFireType(fire_type.value.to_f64()));
     }
     Ok(())
 }
 
-fn nelson_height(
-    flame_length: Cell<f64>,
-    fire_type: Cell<f64>,
-    fire_intensity: Cell<f64>,
-    midflame_ws: Cell<f64>,
-    precision: [Precision; 3],
-) -> Cell<f64> {
+fn nelson_height<T: ModelValue>(
+    flame_length: Cell<T>,
+    fire_type: Cell<T>,
+    fire_intensity: Cell<T>,
+    midflame_ws: Cell<T>,
+    precision: [T::Stage; 3],
+) -> Cell<T> {
     let [product, division, selected] = precision;
     // The reference membership test returns false for masked fire types.
-    let coefficient = if !fire_type.masked && matches!(fire_type.value, 1.0 | 2.0) {
+    let coefficient = if !fire_type.masked
+        && (fire_type.value == T::from_f64(1.0) || fire_type.value == T::from_f64(2.0))
+    {
         1.0 / 360.0
     } else {
         0.0175
     };
     let height = selected.convert(Cell::select(
-        midflame_ws.eq_cell(0.0),
+        midflame_ws.eq_cell(constant(0.0)),
         flame_length,
-        division.div(product.mul(coefficient.into(), fire_intensity), midflame_ws),
+        division.div(
+            product.mul(constant(coefficient), fire_intensity),
+            midflame_ws,
+        ),
     ));
     Cell::select(height.gt(flame_length), flame_length, height)
 }
@@ -93,8 +102,18 @@ pub fn nelson_height_array_with_precision(
     midflame_ws: ArrayViewD<'_, Cell<f64>>,
     widths: [u8; 3],
 ) -> Result<ArrayD<Cell<f64>>, Error> {
+    nelson_height_array_at_widths(flame_length, fire_type, fire_intensity, midflame_ws, widths)
+}
+
+pub(crate) fn nelson_height_array_at_widths<T: ModelValue>(
+    flame_length: ArrayViewD<'_, Cell<T>>,
+    fire_type: ArrayViewD<'_, Cell<T>>,
+    fire_intensity: ArrayViewD<'_, Cell<T>>,
+    midflame_ws: ArrayViewD<'_, Cell<T>>,
+    widths: [u8; 3],
+) -> Result<ArrayD<Cell<T>>, Error> {
     fire_type.iter().copied().try_for_each(validate_fire_type)?;
-    let precision = Precision::widths(widths)?;
+    let precision = T::Stage::widths(widths)?;
     broadcast(
         [
             flame_length.view(),
@@ -106,20 +125,20 @@ pub fn nelson_height_array_with_precision(
     )
 }
 
-fn finney_height(
-    flame_length: Cell<f64>,
-    flame_tilt: Cell<f64>,
-    slope_angle: Cell<f64>,
+fn finney_height<T: ModelValue>(
+    flame_length: Cell<T>,
+    flame_tilt: Cell<T>,
+    slope_angle: Cell<T>,
     slope_units: SlopeUnits,
-    precision: [Precision; 8],
-) -> Cell<f64> {
+    precision: [T::Stage; 8],
+) -> Cell<T> {
     let [tilt_rad, horizontal, slope, flat, difference, product, complement, quotient] = precision;
     let slope_rad = slope.slope(slope_angle, slope_units);
-    let tilt_h = horizontal.sub(FRAC_PI_2.into(), tilt_rad.radians(flame_tilt));
+    let tilt_h = horizontal.sub(constant(FRAC_PI_2), tilt_rad.radians(flame_tilt));
     let tilted = difference.sin(difference.sub(tilt_h, slope_rad));
-    let denominator = complement.sin(complement.sub(FRAC_PI_2.into(), slope_rad));
+    let denominator = complement.sin(complement.sub(constant(FRAC_PI_2), slope_rad));
     Cell::select(
-        slope_angle.le(1.0),
+        slope_angle.le(constant(1.0)),
         flat.mul(flame_length, horizontal.sin(tilt_h)),
         quotient.div(product.mul(flame_length, tilted), denominator),
     )
@@ -136,7 +155,17 @@ pub fn finney_height_array_with_precision(
     units: SlopeUnits,
     widths: [u8; 8],
 ) -> Result<ArrayD<Cell<f64>>, Error> {
-    let precision = Precision::widths(widths)?;
+    finney_height_array_at_widths(length, tilt, slope, units, widths)
+}
+
+pub(crate) fn finney_height_array_at_widths<T: ModelValue>(
+    length: ArrayViewD<'_, Cell<T>>,
+    tilt: ArrayViewD<'_, Cell<T>>,
+    slope: ArrayViewD<'_, Cell<T>>,
+    units: SlopeUnits,
+    widths: [u8; 8],
+) -> Result<ArrayD<Cell<T>>, Error> {
+    let precision = T::Stage::widths(widths)?;
     broadcast(
         [length.view(), tilt.view(), slope.view()],
         |[length, tilt, slope]| finney_height(length, tilt, slope, units, precision),

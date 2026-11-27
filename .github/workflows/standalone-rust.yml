@@ -39,6 +39,9 @@ jobs:
       - name: Test library and CLI
         run: cargo test --locked -p flame-components -p flame-components-cli
 
+      - name: Test optional long double arithmetic and kernels
+        run: cargo test --locked -p flame-components-wide -p flame-components --features extended
+
       - name: Build standalone CLI
         run: cargo build --locked --release -p flame-components-cli
 

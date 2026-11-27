@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/flame-components", "crates/flame-components-cli", "crates/flame-components-py"]
+members = [
+    "crates/flame-components",
+    "crates/flame-components-cli",
+    "crates/flame-components-py",
+    "crates/flame-components-wide",
+]
 default-members = ["crates/flame-components", "crates/flame-components-cli"]
 resolver = "2"
 

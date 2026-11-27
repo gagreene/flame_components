@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use ndarray::{ArrayD, ArrayViewD};
 
-use crate::precision::Precision;
+use crate::precision::{constant, ModelValue, Stage};
 use crate::{array::broadcast, Cell, Error};
 
 macro_rules! length_models {
@@ -120,10 +120,23 @@ pub fn flame_length_array_with_precision(
     flame_depth: Option<ArrayViewD<'_, Cell<f64>>>,
     widths: [u8; 4],
 ) -> Result<ArrayD<Cell<f64>>, Error> {
-    let [power, product, depth_power, quotient] = Precision::widths(widths)?;
+    flame_length_array_at_widths(model, fire_intensity, flame_depth, widths)
+}
+
+pub(crate) fn flame_length_array_at_widths<T: ModelValue>(
+    model: LengthModel,
+    fire_intensity: ArrayViewD<'_, Cell<T>>,
+    flame_depth: Option<ArrayViewD<'_, Cell<T>>>,
+    widths: [u8; 4],
+) -> Result<ArrayD<Cell<T>>, Error> {
+    let [power, product, depth_power, quotient] = T::Stage::widths(widths)?;
     let (coefficient, intensity_exponent, depth_exponent) = model.coefficients();
-    let numerator =
-        |intensity| product.mul(coefficient.into(), power.pow(intensity, intensity_exponent));
+    let numerator = |intensity| {
+        product.mul(
+            constant(coefficient),
+            power.pow(intensity, intensity_exponent),
+        )
+    };
     match depth_exponent {
         Some(exponent) => {
             let flame_depth = flame_depth.ok_or(Error::MissingFlameDepth)?;

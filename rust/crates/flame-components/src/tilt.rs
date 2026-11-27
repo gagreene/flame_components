@@ -5,7 +5,7 @@ use std::f64::consts::FRAC_PI_2;
 use ndarray::{ArrayD, ArrayViewD, NdFloat};
 
 use crate::array::{broadcast, broadcast_with_extra};
-use crate::precision::Precision;
+use crate::precision::{constant, ModelValue, Precision, Stage};
 use crate::{Cell, Error, SlopeUnits, WindSpeedUnits};
 
 /// Model-specific flame-tilt inputs, as cells or array views.
@@ -54,17 +54,17 @@ pub fn standard_tilt_array<F: NdFloat>(
     )
 }
 
-fn finney_tilt(
-    flame_length: Cell<f64>,
-    flame_height: Cell<f64>,
-    slope_angle: Cell<f64>,
+fn finney_tilt<T: ModelValue>(
+    flame_length: Cell<T>,
+    flame_height: Cell<T>,
+    slope_angle: Cell<T>,
     slope_units: SlopeUnits,
-    precision: [Precision; 7],
+    precision: [T::Stage; 7],
     height_equals_length: Cell<bool>,
-) -> Cell<f64> {
+) -> Cell<T> {
     let [slope, complement, product, ratio, horizontal, vertical, output] = precision;
     let slope_rad = slope.slope(slope_angle, slope_units);
-    let angle = complement.sub(FRAC_PI_2.into(), slope_rad);
+    let angle = complement.sub(constant(FRAC_PI_2), slope_rad);
     // Keep the reference angle conversions in order because they affect rounding.
     let projected = product.mul(flame_height, complement.degrees(complement.sin(angle)));
     let tilt_h = horizontal.add(
@@ -73,8 +73,8 @@ fn finney_tilt(
     );
     output.degrees(Cell::select(
         height_equals_length,
-        Cell::present(0.0),
-        vertical.sub(FRAC_PI_2.into(), tilt_h),
+        constant(0.0),
+        vertical.sub(constant(FRAC_PI_2), tilt_h),
     ))
 }
 
@@ -88,7 +88,17 @@ pub fn finney_tilt_array_with_precision(
     units: SlopeUnits,
     widths: [u8; 7],
 ) -> Result<ArrayD<Cell<f64>>, Error> {
-    let precision = Precision::widths(widths)?;
+    finney_tilt_array_at_widths(length, height, slope, units, widths)
+}
+
+pub(crate) fn finney_tilt_array_at_widths<T: ModelValue>(
+    length: ArrayViewD<'_, Cell<T>>,
+    height: ArrayViewD<'_, Cell<T>>,
+    slope: ArrayViewD<'_, Cell<T>>,
+    units: SlopeUnits,
+    widths: [u8; 7],
+) -> Result<ArrayD<Cell<T>>, Error> {
+    let precision = T::Stage::widths(widths)?;
     broadcast(
         [length.view(), height.view(), slope.view()],
         |[length, height, slope]| {
@@ -116,7 +126,18 @@ pub fn finney_tilt_array_with_equality(
     widths: [u8; 7],
     equality: ArrayViewD<'_, Cell<bool>>,
 ) -> Result<ArrayD<Cell<f64>>, Error> {
-    let precision = Precision::widths(widths)?;
+    finney_tilt_array_at_widths_with_equality(length, height, slope, units, widths, equality)
+}
+
+pub(crate) fn finney_tilt_array_at_widths_with_equality<T: ModelValue>(
+    length: ArrayViewD<'_, Cell<T>>,
+    height: ArrayViewD<'_, Cell<T>>,
+    slope: ArrayViewD<'_, Cell<T>>,
+    units: SlopeUnits,
+    widths: [u8; 7],
+    equality: ArrayViewD<'_, Cell<bool>>,
+) -> Result<ArrayD<Cell<T>>, Error> {
+    let precision = T::Stage::widths(widths)?;
     broadcast_with_extra(
         [length.view(), height.view(), slope.view()],
         equality,
@@ -132,38 +153,46 @@ pub fn standard_tilt_array_with_precision(
     height: ArrayViewD<'_, Cell<f64>>,
     width: u8,
 ) -> Result<ArrayD<Cell<f64>>, Error> {
-    let [p] = Precision::widths([width])?;
+    standard_tilt_array_at_widths(length, height, width)
+}
+
+pub(crate) fn standard_tilt_array_at_widths<T: ModelValue>(
+    length: ArrayViewD<'_, Cell<T>>,
+    height: ArrayViewD<'_, Cell<T>>,
+    width: u8,
+) -> Result<ArrayD<Cell<T>>, Error> {
+    let [p] = T::Stage::widths([width])?;
     broadcast([length.view(), height.view()], |[length, height]| {
         p.degrees(p.acos(p.div(height, length)))
     })
 }
 
-fn validate_canopy_height(canopy_ht: Cell<f64>) -> Result<(), Error> {
-    if !canopy_ht.masked && canopy_ht.value <= 0.0 {
-        return Err(Error::NonPositiveCanopyHeight(canopy_ht.value));
+fn validate_canopy_height<T: ModelValue>(canopy_ht: Cell<T>) -> Result<(), Error> {
+    if !canopy_ht.masked && canopy_ht.value <= T::from_f64(0.0) {
+        return Err(Error::NonPositiveCanopyHeight(canopy_ht.value.to_f64()));
     }
     Ok(())
 }
 
-fn butler_tilt(
-    wind_speed: Cell<f64>,
+fn butler_tilt<T: ModelValue>(
+    wind_speed: Cell<T>,
     wind_speed_units: WindSpeedUnits,
-    canopy_ht: Cell<f64>,
-    precision: [Precision; 10],
-) -> Cell<f64> {
+    canopy_ht: Cell<T>,
+    precision: [T::Stage; 10],
+) -> Cell<T> {
     let [units, reciprocal, log_arg, log_sum, denom, canopy, cube, numerator, ratio, output] =
         precision;
     let wind_speed = match wind_speed_units {
-        WindSpeedUnits::Kph => units.div(wind_speed, 3.6.into()),
+        WindSpeedUnits::Kph => units.div(wind_speed, constant(3.6)),
         WindSpeedUnits::Mps => wind_speed,
-        WindSpeedUnits::Mph => units.div(wind_speed, 2.23694.into()),
+        WindSpeedUnits::Mph => units.div(wind_speed, constant(2.23694)),
     };
-    let roughness = log_arg.add(1.0.into(), reciprocal.div(28.0.into(), canopy_ht));
-    let profile = log_sum.add(1.0.into(), log_arg.log(roughness));
-    let canopy_wind = canopy.div(wind_speed, denom.mul(3.6.into(), profile));
+    let roughness = log_arg.add(constant(1.0), reciprocal.div(constant(28.0), canopy_ht));
+    let profile = log_sum.add(constant(1.0), log_arg.log(roughness));
+    let canopy_wind = canopy.div(wind_speed, denom.mul(constant(3.6), profile));
     let buoyancy_ratio = ratio.div(
-        numerator.mul(3.0.into(), cube.pow(canopy_wind, 3.0)),
-        (2.0 * 9.81 * 10.0).into(),
+        numerator.mul(constant(3.0), cube.pow(canopy_wind, 3.0)),
+        constant(2.0 * 9.81 * 10.0),
     );
     output.degrees(ratio.atan(ratio.sqrt(buoyancy_ratio)))
 }
@@ -177,11 +206,20 @@ pub fn butler_tilt_array_with_precision(
     canopy_ht: ArrayViewD<'_, Cell<f64>>,
     widths: [u8; 10],
 ) -> Result<ArrayD<Cell<f64>>, Error> {
+    butler_tilt_array_at_widths(wind_speed, units, canopy_ht, widths)
+}
+
+pub(crate) fn butler_tilt_array_at_widths<T: ModelValue>(
+    wind_speed: ArrayViewD<'_, Cell<T>>,
+    units: WindSpeedUnits,
+    canopy_ht: ArrayViewD<'_, Cell<T>>,
+    widths: [u8; 10],
+) -> Result<ArrayD<Cell<T>>, Error> {
     canopy_ht
         .iter()
         .copied()
         .try_for_each(validate_canopy_height)?;
-    let precision = Precision::widths(widths)?;
+    let precision = T::Stage::widths(widths)?;
     broadcast([wind_speed.view(), canopy_ht.view()], |[wind, canopy]| {
         butler_tilt(wind, units, canopy, precision)
     })
