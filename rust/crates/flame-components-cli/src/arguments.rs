@@ -112,13 +112,13 @@ impl Arguments {
     }
 
     pub(crate) fn cell(&mut self, name: &str) -> Result<Cell<f64>, String> {
-        self.scalar(name).map(Scalar::to_cell)
+        self.scalar(name).map(Scalar::into_cell)
     }
 
     pub(crate) fn optional_cell(&mut self, name: &str) -> Result<Option<Cell<f64>>, String> {
         self.0
             .remove(name)
-            .map(|arg| arg.into_scalar(name).map(Scalar::to_cell))
+            .map(|arg| arg.into_scalar(name).map(Scalar::into_cell))
             .transpose()
     }
 
@@ -214,7 +214,7 @@ impl Scalar {
         }
     }
 
-    pub(crate) fn to_cell(self) -> Cell<f64> {
+    pub(crate) fn into_cell(self) -> Cell<f64> {
         match self {
             Self::Integer(value) => Cell::present(value as f64),
             Self::Float(value) => Cell::input(value),

@@ -223,7 +223,7 @@ fn run() -> Result<String, String> {
                     )
                 }
                 (ros, res_time) => {
-                    float_result(flame_depth(ros.to_cell(), res_time.to_cell()).nonnegative())
+                    float_result(flame_depth(ros.into_cell(), res_time.into_cell()).nonnegative())
                 }
             }
         }
@@ -257,7 +257,7 @@ impl Arguments {
             Some("surface") => FireType::Surface.into(),
             Some("passive crown") => FireType::PassiveCrown.into(),
             Some("active crown") => FireType::ActiveCrown.into(),
-            _ => argument.into_scalar("fire-type")?.to_cell(),
+            _ => argument.into_scalar("fire-type")?.into_cell(),
         })
     }
 
