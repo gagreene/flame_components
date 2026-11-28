@@ -1,42 +1,44 @@
-# Flame Components — Codebase Reference
+# Flame Components ? Codebase Reference
 
 ## Architecture Overview
 
-Flame Components is a pure-Python, `src/`-layout library for wildfire flame-behavior
-calculations. The six calculations accept real scalars and real numeric NumPy arrays,
-including masked arrays. The multiprocessing dispatcher partitions arrays by row.
+Flame Components has a Python facade, a standalone Rust library, and a
+standalone CLI for wildfire flame-behavior calculations. The six Python
+calculations accept real scalars and numeric NumPy arrays, including masked
+arrays. A separate dispatcher partitions arrays by row for multiprocessing.
 
-- **`src/flame_components/core.py`** contains the six NumPy-based calculations, the
-  multiprocessing dispatcher, and its worker.
-- **`src/flame_components/_utils.py`** handles shared input validation, masking, result
-  formatting, and row-count checks.
-- **`src/flame_components/__init__.py`** — thin re-export shim. Imports the 7 public
-  names from `core.py`, sets `__all__`, and exposes `__version__` via
-  `importlib.metadata` (hatch-vcs-derived at build time).
+The Python facade validates inputs and selects a backend. NumPy provides the
+Python reference equations. The compiled Python extension adapts NumPy
+buffers to the standalone Rust library. Automatic selection prefers Rust
+when the extension loads and uses NumPy when the extension is absent or a
+caller requests explicit NumPy error handling. Import errors in an installed
+extension propagate to the caller.
 
-There are no classes, no configuration files, no CLI, and no external state. The library
-is imported as a dependency by downstream fire-modeling systems (e.g. FuelAnalyst).
+The Rust library and CLI build independently of Python. The library's
+optional `extended` feature bundles the host C `long double` arithmetic used
+by the Python extension for compatible extended-precision inputs. Maturin
+builds the Python distribution from the workspace version in `rust/Cargo.toml`.
+The Python package reads its installed version through `importlib.metadata`.
 
-An ArcPy-based variant (`archive/flame_components_arcgisRaster.py`) exists in the repo but
-is **not part of the installable package** — `pyproject.toml` excludes `archive/` from the
-sdist, and nothing in `src/` imports it. It predates the current API (camelCase names,
-`arcpy.Raster` inputs) and is kept only as a historical reference for anyone porting the
-Raster-based calculations forward; treat anything in it as unmaintained.
-
----
+The ArcPy implementation under `archive/` is a historical reference.
 
 ## Key Files and Responsibilities
 
 | File | Role |
 |---|---|
-| `src/flame_components/core.py` | Seven public functions and the multiprocessing worker. |
+| `src/flame_components/core.py` | Public signatures, model validation, result formatting, and warnings. |
+| `src/flame_components/_backend.py` | Backend selection and native extension loading. |
+| `src/flame_components/_equations.py` | NumPy reference equations and model coefficients. |
+| `src/flame_components/_native_bridge.py` and `_precision.py` | Native buffers, masks, shapes, and NumPy-compatible precision metadata. |
 | `src/flame_components/_utils.py` | Shared validation, masking, and result formatting. |
-| `src/flame_components/__init__.py` | Public API re-export, `__all__`, `__version__`. |
-| `docs/CODEBASE.md` | This file — internal architecture reference. |
-| `docs/TEST_SUITE_DESCRIPTION.md` | Current test-suite catalog and conventions. |
-| `README.md` | User-facing project overview, install, usage, API reference. |
-| `tests/unit/`, `tests/integration/`, `tests/regression/` | Tests for individual functions, pipelines, and known regressions. |
-| `archive/flame_components_arcgisRaster.py` | Unmaintained ArcPy variant. Excluded from the sdist. Not imported by anything in `src/`. |
+| `src/flame_components/_blocks.py` | Block partitioning and module-level multiprocessing worker. |
+| `src/flame_components/__init__.py` | Public API exports and installed version. |
+| `rust/crates/flame-components/` | Rust equations, typed scalar and array APIs, and optional extended arithmetic. |
+| `rust/crates/flame-components-py/` | PyO3 and NumPy buffer bindings. |
+| `rust/crates/flame-components-cli/` | Standalone scalar CLI with flags and JSON input. |
+| `tests/fixtures/parity/` | Frozen Python reference inputs, outputs, and provenance. |
+| `docs/TEST_SUITE_DESCRIPTION.md` | Test suites and verification commands. |
+| `README.md` | Installation, usage, API reference, and scientific sources. |
 
 ### `core.py` — function inventory
 
@@ -49,10 +51,8 @@ Raster-based calculations forward; treat anything in it as unmaintained.
 | `get_flame_residence_time` | ROS, fuel consumption, mid-flame WS, units | residence time (sec or min) | Nelson & Adkins (1988) |
 | `get_flame_depth` | ROS, residence time | flame depth (m) | Fons et al. (1963) |
 | `flame_component_array_multiprocessing` | flame_function name, num_processors, block_size, **kwargs | List of results in block order | Internal dispatcher over the above |
-| `_multiprocessing_worker` | func_name, kwargs_dict | function result | Internal — module-level so `multiprocessing.Pool` can pickle it |
 
-No camelCase aliases exist — see the 2026-08-24 Decision Log entry (removed entirely,
-pre-first-release, no deprecation cycle needed since there were no external consumers yet).
+Public Python function names use snake_case.
 
 ---
 
@@ -62,19 +62,14 @@ pre-first-release, no deprecation cycle needed since there were no external cons
 
 ```mermaid
 flowchart TD
-    A([Caller: scalar or ndarray]) --> B{Any ndarray in inputs?}
-    B -- yes --> C[return_array = True]
-    B -- no --> D[return_array = False]
-    C & D --> E[Validate each param\nTypeError / ValueError if bad]
-    E --> F[Normalize numeric inputs\nCombine NaNs with existing masks]
-    F --> G[Unit conversion\ne.g. km/h → m/s, m → ft]
-    G --> H[Derive intermediates\ne.g. crown_ratio, f, slope_rad]
-    H --> I{Model selection\ndict lookup or if/elif}
-    I --> J[Vectorised calculation\nma.where / power / sin / log ...]
-    J --> K[Clamp negatives to 0\nFill masked results with NaN]
-    K --> L{return_array?}
-    L -- yes --> M([Return ndarray])
-    L -- no --> N([Return NumPy scalar])
+    A[Caller supplies scalars or arrays] --> B[Resolve backend and validate inputs]
+    B --> C[Normalize data and masks]
+    C --> D{Selected backend}
+    D -- Python --> E[Run NumPy reference equations]
+    D -- Rust --> F[Adapt values, masks, and precision for Rust]
+    F --> G[Run standalone Rust kernels]
+    E & G --> H[Handle diagnostics and format the result]
+    H --> I[Return a scalar or array]
 ```
 
 ### Multiprocessing path
@@ -82,11 +77,11 @@ flowchart TD
 ```mermaid
 flowchart TD
     A([Caller]) --> B[flame_component_array_multiprocessing]
-    B --> C[Validate flame_function and resolve function name]
+    B --> C[Resolve backend and validate the function]
     C --> D[Verify array shapes and obtain row count]
     D --> E[Use caller's block size or default to max of 1 and rows divided by processors]
     E --> F[Slice array arguments by block\nCopy scalar arguments into each task]
-    F --> G[mp.Pool.starmap\n_multiprocessing_worker, one task per block]
+    F --> G[mp.Pool.starmap\nEach worker calls the selected backend]
     G --> H([Return results in block order])
 ```
 
