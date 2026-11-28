@@ -73,6 +73,21 @@ jobs:
             done
           done
 
+      - name: Verify standalone CLI coverage
+        run: |
+          set -euo pipefail
+          for asset in \
+            flame-components-linux-x86_64.tar.gz \
+            flame-components-linux-aarch64.tar.gz \
+            flame-components-windows-x86_64.exe \
+            flame-components-macos-x86_64.tar.gz \
+            flame-components-macos-arm64.tar.gz; do
+            if [[ ! -s "cli/$asset" ]]; then
+              echo "Missing or empty CLI asset $asset" >&2
+              exit 1
+            fi
+          done
+
       - name: Validate Python distributions
         run: uvx --python 3.12 twine check dist/*
 

@@ -65,6 +65,9 @@ Build the executable with `cargo build --release --locked --manifest-path
 rust/Cargo.toml -p flame-components-cli`. For example,
 `flame-components flame-depth --ros 3 --res-time 2` prints `6`.
 The CLI accepts scalar flags and scalar JSON from a file or standard input.
+The [release downloads](https://github.com/gagreene/flame_components/releases/tag/v0.2.0)
+include standalone executables for Linux x86-64 and ARM64, Windows x86-64,
+and macOS Intel and Apple Silicon.
 [CLI reference](https://github.com/gagreene/flame_components/blob/v0.2.0/rust/crates/flame-components-cli/README.md)
 
 ## Usage
