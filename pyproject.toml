@@ -32,10 +32,10 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/gagreene/flame_components"
-Source = "https://github.com/gagreene/flame_components"
+Source = "https://github.com/gagreene/flame_components/tree/v0.2.0rc2"
 "Issue Tracker" = "https://github.com/gagreene/flame_components/issues"
-"Release Notes" = "https://github.com/gagreene/flame_components/releases"
-Documentation = "https://github.com/gagreene/flame_components#readme"
+"Release Notes" = "https://github.com/gagreene/flame_components/releases/tag/v0.2.0rc2"
+Documentation = "https://github.com/gagreene/flame_components/tree/v0.2.0rc2#readme"
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]

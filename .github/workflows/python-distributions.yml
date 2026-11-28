@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-15]
+        os: [ubuntu-22.04, ubuntu-24.04-arm, windows-latest, macos-15, macos-15-intel]
         python-version: ["3.11", "3.12", "3.13", "3.14"]
         numpy: [numpy]
         include:
@@ -54,7 +54,7 @@ jobs:
           maturin-version: v1.9.6
           rust-toolchain: "1.78.0"
           # The action uses a container on Linux and the runner interpreter elsewhere.
-          manylinux: "2_28"
+          manylinux: "2_17"
           args: --release --out dist --interpreter ${{ runner.os == 'Linux' && format('python{0}', matrix.python-version) || 'python' }}
 
       - name: Install wheel into a fresh environment

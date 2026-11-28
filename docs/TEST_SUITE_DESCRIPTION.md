@@ -1,7 +1,20 @@
 # Test Suite Description
 
-**114 tests** across three groups: `tests/unit/` (102), `tests/integration/` (7),
-`tests/regression/` (5). Run with `pytest tests/ -v` (or `uv run pytest tests/ -v`).
+Python tests cover both calculation backends, public validation, and
+multiprocessing. Build the native extension with `uv sync`, then run each
+backend explicitly.
+
+```text
+uv run pytest tests/ -v --calculation-backend=python
+uv run pytest tests/ -v --calculation-backend=rust
+```
+
+The standalone library and CLI suites run with Cargo.
+
+```text
+cargo test --locked --manifest-path rust/Cargo.toml -p flame-components -p flame-components-cli
+cargo test --locked --manifest-path rust/Cargo.toml -p flame-components --features extended
+```
 
 ## Overview
 
@@ -9,12 +22,9 @@
 height, tilt, residence time, depth) from scalar or `numpy.ndarray` inputs. Every public
 function shares two conventions the test suite verifies throughout:
 
-1. **NaN propagation via `numpy.ma`.** Inputs are converted to masked arrays with NaN
-   cells masked. Masked cells must produce NaN in the output (`.filled(nan)`), never a
-   garbage value from `numpy.ma`'s internal domain-safe fill — `numpy.ma`'s "domained"
-   ufuncs (`ma.divide`, `ma.power`, `ma.log`, ...) substitute an internal safe value into
-   masked positions before computing, so only `.filled(nan)` guarantees a literal NaN.
-   Every `test_nan_propagates` test in this suite exercises this contract.
+1. **Per-cell masks.** Input NaNs join the existing mask. The selected branch
+   determines which masks propagate. Result formatting fills masked positions
+   with NaN and retains computed NaNs and signed zero.
 2. **Two failure modes for bad input, deliberately different:**
    - **Type/argument errors** (wrong type, missing required argument, unknown enum
      value like an invalid `model` or `units` string) → raise `TypeError` or
@@ -51,6 +61,22 @@ convention above:
   length).
 
 ---
+
+## Backend, parity, and packaging coverage
+
+| Tests | What they cover |
+|---|---|
+| `tests/unit/test_backend.py` and `test_warning_contract.py` | Explicit and automatic backend selection, import failures, NumPy error policies, multiprocessing dispatch, and warning location and order. |
+| `tests/unit/test_input_validation.py` | Dtypes, scalar validation, legacy model names, signed zeros, computed NaNs, and partial blocks. |
+| `tests/integration/test_reference_fixtures.py` | Both Python-reachable engines against the frozen reference in `tests/fixtures/parity/`. Provenance records the reference commit and runtime. |
+| `tests/integration/test_native_extension.py`, `test_native_extended_buffers.py`, and `test_numpy_scalar_parity.py` | Native buffers, broadcasting, scalar division, precision, model behavior, and maximum-rank shapes. Extended cases run on platforms with a wider NumPy format. |
+| `rust/crates/flame-components/tests/` | Standalone Rust model and fixture checks, masked arithmetic, and extended storage. |
+| `rust/crates/flame-components-cli/tests/` | CLI flags, JSON, diagnostics, and invalid inputs. |
+
+CI builds and installs the native wheels and source distribution. It checks
+Python 3.11?3.14 on Linux, Windows, and macOS, including NumPy 1.23.2 on Linux.
+It also verifies the single Cargo archive, runs the packaged CLI, and exercises
+both automatic backend-selection paths.
 
 ## Unit tests (`tests/unit/`)
 
@@ -213,7 +239,7 @@ Tests the block-splitting multiprocessing dispatcher.
 
 | Test | What & why |
 |---|---|
-| `test_matches_direct_call_when_concatenated` | The dispatcher returns a **list of per-block arrays**, not a single concatenated array (see its docstring's `NOTE`). Concatenating the blocks must reproduce exactly what calling `get_flame_depth` directly on the full array would give — the core correctness guarantee of the whole dispatcher. |
+| `test_matches_direct_call_when_concatenated` | The dispatcher returns a **list of per-block arrays**, not a single concatenated array. Concatenating the blocks must reproduce exactly what calling `get_flame_depth` directly on the full array would give — the core correctness guarantee of the whole dispatcher. |
 | `test_explicit_block_size_produces_expected_block_count` | An explicit `block_size` produces the expected number of correctly-sized blocks — verifies the block-splitting logic itself, independent of the underlying calculation. |
 | `test_num_processors_less_than_two_warns_and_still_runs` | `num_processors=1` emits a `UserWarning` and completes successfully with the documented `num_processors=2` fallback, rather than raising. |
 | `test_num_processors_zero_warns_and_still_runs` | Same fallback path exercised at the `num_processors=0` boundary. |
