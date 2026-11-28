@@ -52,6 +52,27 @@ jobs:
           merge-multiple: true
           path: cli/
 
+      - name: Verify release wheel coverage
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/flame_components-*.tar.gz)
+          if (( ${#wheels[@]} != 20 || ${#sdists[@]} != 1 )); then
+            echo "Expected 20 wheels and 1 sdist; found ${#wheels[@]} wheels and ${#sdists[@]} source distributions." >&2
+            exit 1
+          fi
+          for python in cp311 cp312 cp313 cp314; do
+            for platform in 'win_amd64' 'macosx_*_arm64' 'macosx_*_x86_64' \
+              '*manylinux_2_17_x86_64*' '*manylinux_2_17_aarch64*'; do
+              matches=(dist/flame_components-*-"$python"-"$python"-$platform.whl)
+              if (( ${#matches[@]} != 1 )); then
+                echo "Expected one wheel for $python and $platform; found ${#matches[@]}." >&2
+                exit 1
+              fi
+            done
+          done
+
       - name: Validate Python distributions
         run: uvx --python 3.12 twine check dist/*
 
