@@ -15,14 +15,18 @@ This repository provides several functions for calculating various flame charact
 
 ## Requirements
 
-- Python 3.11+
-- **Libraries**: `numpy`
+- Python 3.11 or later
+- NumPy 1.23.2 or later
 
 ## Installation
 
 ```bash
 pip install flame-components
 ```
+
+Wheels cover CPython 3.11?3.14 on Linux x86-64, Windows x86-64, and
+Apple Silicon macOS. Building from the source distribution requires Rust
+1.78 or later and a C compiler.
 
 **Distribution name vs. import name:** the package is published to PyPI as
 `flame-components` (hyphen, used with `pip install`), but imported in Python as
@@ -35,17 +39,19 @@ import flame_components
 ## Development
 
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management and
-packaging.
+packaging. Development installs build the native extension and require Rust
+and a C compiler.
 
 ```bash
 uv sync              # create .venv and install runtime + dev dependencies
-uv run pytest tests/ -v   # run the test suite
+uv run pytest tests/ -v --calculation-backend=python
+uv run pytest tests/ -v --calculation-backend=rust
 uv build             # build the wheel and sdist into dist/
 ```
 
 ## Rust library
 
-The [standalone Rust crate](rust/crates/flame-components/README.md) provides
+The [standalone Rust crate](https://github.com/gagreene/flame_components/blob/v0.2.0/rust/crates/flame-components/README.md) provides
 scalar and array APIs for all six calculations. Rust 1.78 or later can build
 and test it without a Python environment.
 
@@ -59,7 +65,7 @@ Build the executable with `cargo build --release --locked --manifest-path
 rust/Cargo.toml -p flame-components-cli`. For example,
 `flame-components flame-depth --ros 3 --res-time 2` prints `6`.
 The CLI accepts scalar flags and scalar JSON from a file or standard input.
-[CLI reference](rust/crates/flame-components-cli/README.md)
+[CLI reference](https://github.com/gagreene/flame_components/blob/v0.2.0/rust/crates/flame-components-cli/README.md)
 
 ## Usage
 
@@ -191,8 +197,8 @@ the same shape and have at least one row). `num_processors < 2` is coerced to `2
 final partial block. Use `numpy.concatenate()` to join numeric result arrays.
 `params_only=True` for flame length returns a coefficient tuple for each block.
 
-See `docs/CODEBASE.md` for internal architecture and implementation-level gotchas, and
-`docs/TEST_SUITE_DESCRIPTION.md` for the full test-suite catalog.
+See the [architecture guide](https://github.com/gagreene/flame_components/blob/v0.2.0/docs/CODEBASE.md)
+and the [test suite guide](https://github.com/gagreene/flame_components/blob/v0.2.0/docs/TEST_SUITE_DESCRIPTION.md).
 
 ## Scientific References
 
@@ -204,7 +210,8 @@ detail (journal, volume, DOI) before citing this package's underlying science fo
 - **`get_mid_flame_ws`**: Albini, F.A. & Baughman, R.G. (1979).
 - **`get_flame_length`**: 29 models catalogued in Finney, M.A. & Grumstrup, T.P. (2023);
   each model's original source (Byram, Fons, Nelson, Anderson, Fernandes, Butler, and
-  others) is cited inline next to its coefficients in `core.py`'s `model_dict`.
+  others) is cited next to its coefficients in the
+  [Python reference table](https://github.com/gagreene/flame_components/blob/v0.2.0/src/flame_components/_equations.py).
 - **`get_flame_height`**: Nelson, R.M. & Adkins, C.W. (1986) (`model='Nelson'`), or
   Finney, M.A. & Martin, S.W. (1992) (`model='Finney'`).
 - **`get_flame_tilt`**: Standard geometry (`model='Standard'`), Finney, M.A. & Martin, S.W.
@@ -213,7 +220,7 @@ detail (journal, volume, DOI) before citing this package's underlying science fo
 - **`get_flame_depth`**: Fons, W.L. et al. (1963).
 
 If you use this package in published research, please cite both the package itself (see
-`CITATION.cff`) and the original publication(s) for the specific model(s) you used.
+[CITATION.cff](https://github.com/gagreene/flame_components/blob/v0.2.0/CITATION.cff)) and the original publication(s) for the specific model(s) you used.
 
 ## Support and Issue Reporting
 
@@ -233,4 +240,4 @@ Contributions are welcome. If you have ideas for new features or improvements, p
 ## License
 
 This project is licensed under the MIT License. See the
-[LICENSE](https://github.com/gagreene/flame_components/blob/master/LICENSE) file for details.
+[LICENSE](https://github.com/gagreene/flame_components/blob/v0.2.0/LICENSE) file for details.

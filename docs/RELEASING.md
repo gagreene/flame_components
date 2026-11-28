@@ -40,6 +40,9 @@ be automated from a local session.
    ```
 
    For a TestPyPI rehearsal, tag the release candidate as `v0.2.0rc1`.
+   For a final release, check that the versioned README and Python metadata
+   links point at the published tag. Verify the release-notes link once the
+   GitHub Release is available.
 4. Create a GitHub Release from that tag (Releases → Draft a new release), with curated
    user-facing notes (see "What goes in release notes" below).
    - **Mark it as a pre-release** for an `rcN` tag to publish to TestPyPI.
