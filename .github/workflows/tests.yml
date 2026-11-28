@@ -43,3 +43,33 @@ jobs:
           python="$RUNNER_TEMP/source-test/bin/python"
           "$python" scripts/smoke_test.py --backend auto
           "$python" -c "from flame_components._backend import resolve_backend; assert resolve_backend('auto') == 'python'"
+
+  # Keep the required check names used by the branch rules. Each name gates
+  # the entire current test matrix.
+  required-python-checks:
+    name: ${{ matrix.context }}
+    if: ${{ always() }}
+    needs: [standalone-rust, python-distributions, source-checkout]
+    permissions: {}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        context:
+          - "pytest (ubuntu-latest, py3.11)"
+          - "pytest (ubuntu-latest, py3.12)"
+          - "pytest (ubuntu-latest, py3.13)"
+          - "pytest (ubuntu-latest, py3.14)"
+          - "pytest (windows-latest, py3.12)"
+          - "pytest (Python 3.11, NumPy 1.23.2 minimum)"
+          - "pytest (macos-latest, py3.12)"
+    steps:
+      - name: Require the complete test matrix
+        env:
+          STANDALONE_RESULT: ${{ needs.standalone-rust.result }}
+          DISTRIBUTIONS_RESULT: ${{ needs.python-distributions.result }}
+          SOURCE_RESULT: ${{ needs.source-checkout.result }}
+        run: |
+          test "$STANDALONE_RESULT" = success
+          test "$DISTRIBUTIONS_RESULT" = success
+          test "$SOURCE_RESULT" = success
