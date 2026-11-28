@@ -1,7 +1,8 @@
 # tests/unit/test_get_flame_length.py
 """Unit tests for get_flame_length."""
-import pytest
 import numpy as np
+import pytest
+
 from flame_components import get_flame_length
 
 

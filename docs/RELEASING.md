@@ -19,34 +19,60 @@ be automated from a local session.
    - Workflow name: `release.yml`
    - Environment name: `pypi` (on pypi.org) / `testpypi` (on test.pypi.org) — must match
      the `environment:` name in `.github/workflows/release.yml` exactly.
-3. Branch protection on `master` (Phase 6 of the readiness plan) — require the `Tests`
-   workflow's checks to pass before merge.
+3. Configure branch protection for `master` and `pre_release` to require the `Tests`
+   workflow's checks before merge.
 
 ## Cutting a release
 
 1. Make sure `master` is green (the `Tests` workflow passing on the latest commit) and the
    worktree is clean.
-2. Decide the version. hatch-vcs derives it entirely from the git tag — never edit a
-   version number by hand anywhere.
-3. Create and push an annotated tag:
+2. Set the release SemVer in `[workspace.package]` in `rust/Cargo.toml`, refresh
+   `rust/Cargo.lock` with `cargo update --workspace --manifest-path rust/Cargo.toml`,
+   and get those changes onto `master` before tagging. The library, CLI, and Python
+   extension inherit this version. Maturin derives the Python version from the
+   extension crate and converts it to PEP 440. Cargo `0.2.0-rc.1` becomes Python
+   `0.2.0rc1`.
+3. Create and push an annotated tag with the matching Python version.
+
    ```bash
-   git tag -a v0.1.1 -m "v0.1.1"
-   git push origin v0.1.1
+   git tag -a v0.2.0 -m "v0.2.0"
+   git push origin v0.2.0
    ```
-   For a TestPyPI rehearsal first, use a release-candidate tag instead, e.g. `v0.1.1rc1`.
+
+   For a TestPyPI rehearsal, tag the release candidate as `v0.2.0rc1`.
 4. Create a GitHub Release from that tag (Releases → Draft a new release), with curated
    user-facing notes (see "What goes in release notes" below).
-   - **Mark it as a pre-release** for an `rcN` tag → publishing this Release triggers
-     `.github/workflows/release.yml`'s `publish-testpypi` job.
-   - **Leave it as a full release** for a real version tag → triggers `publish-pypi`.
-5. Publishing the Release triggers the workflow automatically: it builds the wheel and
-   sdist, runs `twine check`, installs the wheel into a fresh environment and runs
-   `scripts/smoke_test.py`, attaches both files to the GitHub Release, then waits for the
-   `pypi` (or `testpypi`) environment's required approval before actually uploading.
-6. Approve the environment deployment when GitHub prompts for it. This is the last chance
-   to stop a bad release before it's public.
-7. After it completes, verify: `pip install flame-components==<version>` in a clean
-   environment, then `python -c "import flame_components as fc; print(fc.__version__)"`.
+   - **Mark it as a pre-release** for an `rcN` tag to publish to TestPyPI.
+   - **Leave it as a full release** for a final version tag to publish to PyPI.
+5. Publishing the GitHub Release runs the distribution workflow. It builds and tests
+   CPython 3.11–3.14 wheels for Linux x86-64 (manylinux 2.28), Windows x86-64, and
+   macOS Apple Silicon. It also builds and installs the source distribution with
+   Rust 1.78. Each installed artifact is checked against the Cargo version and
+   release tag. Standalone CLI binaries are built and tested on all three platforms
+   without Python. The workflow runs `twine check` on the Python distributions and
+   attaches them and the CLI binaries to the GitHub Release before publishing.
+6. Approve the environment deployment if GitHub prompts for it. Production publishing
+   requires the reviewer configured in the one-time setup.
+7. After publishing, install `flame-components==<version>` in a clean environment and
+   run `python scripts/smoke_test.py --backend rust` from a checkout. For a TestPyPI
+   rehearsal, use the TestPyPI release with NumPy installed from PyPI.
+
+Wheels include the Rust extension. Installing the source distribution requires a
+Rust toolchain and a C compiler for the extended-precision arithmetic shim. The standalone CLI runs independently of the Python package.
+
+## Rust source archive
+
+The standalone library can be used as a Cargo path dependency from the checkout.
+From `rust/`, verify the single library archive with its optional extended
+arithmetic enabled.
+
+```bash
+cargo package --locked -p flame-components --features extended
+```
+
+GitHub's standalone Rust workflow verifies this archive. The source for the
+optional `extended` feature ships inside `flame-components`. A crates.io release
+publishes that library crate.
 
 ## What goes in release notes
 

@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/flame-components",
+    "crates/flame-components-cli",
+    "crates/flame-components-py",
+]
+default-members = ["crates/flame-components", "crates/flame-components-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0-rc.1"
+edition = "2021"
+rust-version = "1.78"
+license = "MIT"
+repository = "https://github.com/gagreene/flame_components"
+
+[workspace.dependencies]
+ndarray = "=0.16.1"
+serde_json = "=1.0.117"

@@ -1,8 +1,10 @@
 # tests/unit/test_flame_component_array_multiprocessing.py
 """Unit tests for flame_component_array_multiprocessing."""
 import warnings
-import pytest
+
 import numpy as np
+import pytest
+
 from flame_components import flame_component_array_multiprocessing, get_flame_depth
 
 

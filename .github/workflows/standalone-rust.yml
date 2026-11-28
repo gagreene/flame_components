@@ -1,0 +1,92 @@
+name: Standalone Rust
+
+on:
+  workflow_call:
+    inputs:
+      upload-cli:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  standalone:
+    name: Rust 1.78 library and CLI (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
+          - os: macos-15
+            platform: macos-arm64
+    defaults:
+      run:
+        shell: bash
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@1.78.0
+
+      - name: Test library and CLI
+        run: cargo test --locked -p flame-components -p flame-components-cli
+
+      - name: Test optional long double arithmetic and kernels
+        run: cargo test --locked -p flame-components --features extended
+
+      - name: Build standalone CLI
+        run: cargo build --locked --release -p flame-components-cli
+
+      - name: Package CLI and smoke-test the packaged binary
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          mkdir ../cli
+          asset="flame-components-$PLATFORM"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp target/release/flame-components.exe "../cli/$asset.exe"
+            cp "../cli/$asset.exe" "$RUNNER_TEMP/flame-components.exe"
+            cli=./flame-components.exe
+          else
+            tar -czf "../cli/$asset.tar.gz" -C target/release flame-components
+            tar -xzf "../cli/$asset.tar.gz" -C "$RUNNER_TEMP"
+            cli=./flame-components
+          fi
+          cd "$RUNNER_TEMP"
+          scalar="$("$cli" flame-depth --ros 3 --res-time 2)"
+          json="$(printf '%s\n' '{"ros":3,"res_time":2}' | "$cli" flame-depth --json -)"
+          test "$scalar" = 6
+          test "$json" = 6
+
+      - name: Upload validated CLI
+        if: inputs.upload-cli
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-${{ matrix.platform }}
+          path: cli/*
+          if-no-files-found: error
+
+  cargo-package:
+    name: Verify standalone Cargo archive
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@1.78.0
+
+      - name: Package the standalone library with extended precision
+        run: cargo package --locked -p flame-components --features extended
