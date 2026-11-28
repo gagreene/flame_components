@@ -39,7 +39,8 @@ be automated from a local session.
    git push origin v0.2.0
    ```
 
-   For a TestPyPI rehearsal, tag the release candidate as `v0.2.0rc1`.
+   For a TestPyPI rehearsal, tag the release candidate as `vX.Y.ZrcN` with the matching
+   Cargo version `X.Y.Z-rc.N`.
    For a final release, check that the versioned README and Python metadata
    links point at the published tag. Verify the release-notes link once the
    GitHub Release is available.
@@ -48,10 +49,10 @@ be automated from a local session.
    - **Mark it as a pre-release** for an `rcN` tag to publish to TestPyPI.
    - **Leave it as a full release** for a final version tag to publish to PyPI.
 5. Publishing the GitHub Release runs the distribution workflow. It builds and tests
-   CPython 3.11–3.14 wheels for Linux x86-64 (manylinux 2.28), Windows x86-64, and
-   macOS Apple Silicon. It also builds and installs the source distribution with
-   Rust 1.78. Each installed artifact is checked against the Cargo version and
-   release tag. Standalone CLI binaries are built and tested on all three platforms
+   CPython 3.11–3.14 wheels for Linux x86-64 and ARM64 (manylinux 2.17),
+   Windows x86-64, and macOS Intel and Apple Silicon. It also builds and installs
+   the source distribution with Rust 1.78. Each installed artifact is checked
+   against the Cargo version and release tag. Standalone CLI binaries are built and tested on all three platforms
    without Python. The workflow runs `twine check` on the Python distributions and
    attaches them and the CLI binaries to the GitHub Release before publishing.
 6. Approve the environment deployment if GitHub prompts for it. Production publishing

@@ -24,8 +24,8 @@ This repository provides several functions for calculating various flame charact
 pip install flame-components
 ```
 
-Wheels cover CPython 3.11?3.14 on Linux x86-64, Windows x86-64, and
-Apple Silicon macOS. Building from the source distribution requires Rust
+Wheels cover CPython 3.11?3.14 on Linux x86-64 and ARM64 (glibc 2.17 or later),
+Windows x86-64, and macOS Intel and Apple Silicon. Building from the source distribution requires Rust
 1.78 or later and a C compiler.
 
 **Distribution name vs. import name:** the package is published to PyPI as
@@ -146,6 +146,8 @@ extension is installed and uses NumPy when it is absent. An error loading an
 installed extension propagates to the caller. Use `backend="python"` or
 `backend="rust"` to select an engine explicitly. Rust supports extended NumPy
 `longdouble` inputs when the extension and NumPy use the same native format.
+On Intel macOS, both backends compute powers in binary64 and keep the
+`longdouble` result dtype.
 
 Automatic selection also uses NumPy when `numpy.seterr` or `numpy.errstate`
 requests an exception, callback, log, or printed error. The NumPy backend

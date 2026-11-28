@@ -206,6 +206,12 @@ def test_extended_kernels_match_numpy_values_and_dtypes(native, equation, args, 
 
 
 @requires_wide
+def test_extended_length_keeps_numpy_power_range(native):
+    intensity = np.ldexp(np.ones(2, dtype=np.longdouble), [1100, -1200])
+    _compare(get_flame_length, "Byram_HEAD", intensity, rtol=64 * np.finfo(np.longdouble).eps)
+
+
+@requires_wide
 def test_extended_wind_keeps_canopy_substitution_diagnostic(native):
     height = np.array([0.0, 10.0], dtype=np.longdouble)
     with pytest.warns(UserWarning, match="canopy_ht") as reference:

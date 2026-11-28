@@ -1,5 +1,6 @@
 """Resolve NumPy operation dtypes with scalar and one-cell probes."""
 
+import sys
 from functools import lru_cache
 
 import numpy as np
@@ -21,8 +22,13 @@ def _sample(spec):
     return ma.array(np.ones((1,) if rank else (), dtype=dtype))
 
 
-def _widths(*values, divisions=()):
+def _widths(*values, divisions=(), powers=()):
     widths = [value.dtype.itemsize if value.dtype.kind == "f" else 8 for value in values]
+    if sys.platform == "darwin":
+        # NumPy's Darwin NPY_BLOCK_POWL uses binary64 (NumPy gh-8307).
+        # Only the power operation narrows. Its result keeps the NumPy dtype.
+        for index in powers:
+            widths[index] = min(widths[index], 8)
     for index, numerator, denominator in divisions:
         # Valid 0-D masked-array operations can return ordinary NumPy scalars.
         # Their subsequent division keeps IEEE infinities and NaNs unmasked.
@@ -104,11 +110,12 @@ def _length(intensity, depth, parameters):
     intensity_power = ma.power(intensity, parameters[1])
     numerator = parameters[0] * intensity_power
     if len(parameters) == 2:
-        return _widths(intensity_power, numerator, numerator, numerator), numerator.dtype
+        return _widths(intensity_power, numerator, numerator, numerator, powers=(0,)), numerator.dtype
     depth_power = ma.power(_sample(depth), parameters[2])
     output = numerator / depth_power
     return _widths(
-        intensity_power, numerator, depth_power, output, divisions=[(3, numerator, depth_power)]
+        intensity_power, numerator, depth_power, output,
+        divisions=[(3, numerator, depth_power)], powers=(0, 2),
     ), output.dtype
 
 
@@ -127,7 +134,7 @@ def _residence(ros, fuel, wind, units):
         divisions.append((6, seconds, 60))
     return _widths(
         fuel_power, scaled_fuel, wind_power, numerator, denominator, seconds, output,
-        divisions=divisions,
+        divisions=divisions, powers=(0, 2),
     ), output.dtype
 
 
@@ -190,7 +197,7 @@ def _butler(wind, canopy, units):
         wind, canopy_ratio, log_argument, logarithm, wind_denominator, canopy_wind,
         cube, numerator, fraction, output,
         divisions=[*divisions, (1, 28, canopy), (5, wind, wind_denominator),
-                   (8, numerator, denominator)],
+                   (8, numerator, denominator)], powers=(6,),
     ), output.dtype
 
 
