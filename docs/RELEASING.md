@@ -52,8 +52,9 @@ be automated from a local session.
    CPython 3.11–3.14 wheels for Linux x86-64 and ARM64 (manylinux 2.17),
    Windows x86-64, and macOS Intel and Apple Silicon. It also builds and installs
    the source distribution with Rust 1.78. Each installed artifact is checked
-   against the Cargo version and release tag. Standalone CLI binaries are built and tested on all three platforms
-   without Python. The workflow runs `twine check` on the Python distributions and
+   against the Cargo version and release tag. Standalone CLI binaries are built
+   and tested without Python for the same five OS and architecture combinations.
+   The workflow checks both artifact sets and runs `twine check` on the Python distributions. It
    attaches them and the CLI binaries to the GitHub Release before publishing.
 6. Approve the environment deployment if GitHub prompts for it. Production publishing
    requires the reviewer configured in the one-time setup.
